@@ -1,0 +1,6 @@
+node_modules
+dist
+.DS_Store
+# Keep only the final render in out/
+out/*
+!out/iDentalBilling-25s.mp4
