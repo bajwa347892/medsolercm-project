@@ -1,11 +1,14 @@
 import React from "react";
-import { interpolateColors, useCurrentFrame } from "remotion";
+import { Easing, interpolateColors, useCurrentFrame } from "remotion";
 import { CheckIcon } from "./ClaimCard";
 import { C, inter, mono } from "../theme";
 import {
   ARRIVE,
   AXIS_X0,
   AXIS_X1,
+  BAR_RISE,
+  BAR_THIN,
+  COUNT_END,
   EASE_IN,
   EASE_IN_OUT,
   EASE_OUT,
@@ -17,8 +20,11 @@ import {
   RING_R,
   RULE,
   STAGES,
+  TO_AXIS,
+  TO_RULE,
   TRACK_X0,
   TRACK_X1,
+  UNROLL,
   axisX,
   axisY,
   cardRide,
@@ -28,6 +34,12 @@ import {
   ringRot,
   statValue,
 } from "../timeline";
+
+const EASE_SINE = Easing.inOut(Easing.sin);
+
+/** Fade that leaves at an even rate (no single-frame pop at the end). */
+const proofFade = (f: number, delay = 0) =>
+  1 - p(f, PROOF_EXIT + delay, PROOF_EXIT + delay + 14, EASE_IN_OUT);
 
 /* ------------------------------------------------------------------ */
 /* One bar that becomes everything: aging report -> pipeline track     */
@@ -45,7 +57,8 @@ const SHRINK = [0.2, 0.4, 0.7, 1];
 const BUCKET_COLORS = [C.g1, C.g2, C.g3];
 
 const agingWidths = (f: number) => {
-  const grow = p(f, 26, 150, (t) => t * (2 - t) * 0.6 + t * 0.4);
+  // Starts and ends at rest: the report creeps, builds, then stalls at the turn.
+  const grow = p(f, 26, 150, Easing.bezier(0.33, 0, 0.25, 1));
   const mix = p(f, 26, 150, EASE_IN_OUT);
   const total = AGING_MAX * grow;
   const shrink = p(f, 188, 246, EASE_IN_OUT);
@@ -59,34 +72,44 @@ export const AgingToAxis: React.FC = () => {
   const agingTotal = widths.reduce((a, b) => a + b, 0);
 
   // Morph timings
-  const thin = p(f, 248, 262, EASE_IN_OUT); // bar thins to a line
-  const travel = p(f, 256, 282, EASE_IN_OUT); // line rises and stretches into the track
-  const toAxis = p(f, 450, 478, EASE_IN_OUT); // track becomes the chart axis
-  const gone = p(f, PROOF_EXIT, PROOF_EXIT + 14, EASE_IN);
+  const thin = p(f, BAR_THIN[0], BAR_THIN[1], EASE_IN_OUT); // bar thins to a line
+  const travel = p(f, BAR_RISE[0], BAR_RISE[1], EASE_IN_OUT); // line rises and stretches into the track
+  const toAxis = p(f, TO_AXIS[0], TO_AXIS[1], EASE_IN_OUT); // track becomes the chart axis
+  const gone = p(f, PROOF_EXIT, PROOF_EXIT + 14, EASE_IN_OUT);
 
   const pan = panX(f);
   const trackX0 = lerp(lerp(AGING_X, TRACK_X0 + pan, travel), AXIS_X0, toAxis);
   const trackX1Full = lerp(TRACK_X1 + pan, AXIS_X1, toAxis);
   const trackW = lerp(agingTotal, trackX1Full - trackX0, travel);
   const h = lerp(lerp(AGING_H, 6, thin), 14, toAxis);
-  const cy = lerp(lerp(AGING_Y + AGING_H / 2, NODE_Y, travel), axisY(f), toAxis);
+  const ay = axisY(f);
+  const cy = lerp(lerp(AGING_Y + AGING_H / 2, NODE_Y, travel), ay, toAxis);
 
-  const labelFade = 1 - p(f, 244, 256, EASE_IN);
+  const labelFade = 1 - p(f, 244, 254, EASE_IN_OUT);
   const showBuckets = thin < 1;
 
-  // Orange progress fill that follows the claim
+  // Orange progress fill: bound to the track, follows the claim, then
+  // retracts to the axis origin where the count-up takes over.
   const ride = cardRide(f);
-  const fillEnd = f < 282 ? TRACK_X0 : ride.x;
-  const fillOpacity = (f >= 282 ? 1 : 0) * (1 - p(f, 446, 462, EASE_IN));
+  const progressW = f < ARRIVE[0] ? 0 : ride.x - TRACK_X0;
+  const fillW = lerp(progressW * lerp(1, trackW / (TRACK_X1 - TRACK_X0), toAxis), 0, toAxis);
+  const showProgress = f >= ARRIVE[0] && f < TO_AXIS[1];
+
+  // Industry band: a neutral benchmark zone the orange bar runs over.
+  const band = p(f, 496, 514, EASE_IN_OUT);
 
   // Stat fill: 90 -> 98.7 on the axis, then becomes the accent rule.
   const v = statValue(f);
-  const statFillOn = f >= 486 ? 1 : 0;
-  const toRule = p(f, 622, 650, EASE_IN_OUT);
+  const toRule = p(f, TO_RULE[0], TO_RULE[1], EASE_IN_OUT);
   const sx0 = lerp(AXIS_X0, RULE.cx - RULE.w / 2, toRule);
   const sx1 = lerp(axisX(v), RULE.cx + RULE.w / 2, toRule);
   const sh = lerp(14, RULE.h, toRule);
-  const scy = lerp(axisY(f), RULE.y + RULE.h / 2, toRule);
+  const scy = lerp(ay, RULE.y + RULE.h / 2, toRule);
+  const showStat = f >= TO_AXIS[1];
+
+  // Marker rides the end of the bar, and shrinks away as the bar becomes the rule.
+  const marker = p(f, TO_AXIS[1], TO_AXIS[1] + 12, EASE_POP) * (1 - p(f, TO_RULE[0], TO_RULE[0] + 12, EASE_IN));
+  const ripple = p(f, COUNT_END - 8, COUNT_END + 16, EASE_OUT);
 
   const trackColor =
     toAxis > 0
@@ -151,7 +174,7 @@ export const AgingToAxis: React.FC = () => {
         </div>
       ) : null}
 
-      {/* bucket labels */}
+      {/* bucket labels: each appears only once its segment can hold it */}
       {showBuckets && labelFade > 0
         ? widths.map((w, i) => {
             const left = AGING_X + widths.slice(0, i).reduce((a, b) => a + b, 0);
@@ -166,7 +189,7 @@ export const AgingToAxis: React.FC = () => {
                   fontSize: 19,
                   fontWeight: 500,
                   color: i === 3 ? C.white : C.g2,
-                  opacity: Math.min(1, w / 90) * labelFade,
+                  opacity: Math.max(0, Math.min(1, (w - 66) / 20)) * labelFade,
                   whiteSpace: "nowrap",
                 }}
               >
@@ -177,30 +200,47 @@ export const AgingToAxis: React.FC = () => {
         : null}
 
       {/* progress fill along the pipeline */}
-      {fillOpacity > 0 ? (
+      {showProgress && fillW > 0.5 ? (
         <div
           style={{
             position: "absolute",
-            left: TRACK_X0 + pan,
-            top: NODE_Y - 3,
-            width: Math.max(0, fillEnd - TRACK_X0),
-            height: 6,
-            borderRadius: 3,
+            left: trackX0,
+            top: cy - h / 2,
+            width: fillW,
+            height: h,
+            borderRadius: h / 2,
             background: `linear-gradient(90deg, ${C.orangeDeep}, ${C.orange})`,
             boxShadow: `0 0 18px rgba(244,117,33,0.8)`,
-            opacity: fillOpacity,
+          }}
+        />
+      ) : null}
+
+      {/* industry average band, under the stat fill */}
+      {band > 0 ? (
+        <div
+          style={{
+            position: "absolute",
+            left: axisX(91),
+            top: ay - 19,
+            width: (axisX(95) - axisX(91)) * band,
+            height: 38,
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.10)",
+            border: "1.5px dashed rgba(255,255,255,0.32)",
+            boxSizing: "border-box",
+            opacity: proofFade(f, 2),
           }}
         />
       ) : null}
 
       {/* stat fill -> accent rule */}
-      {statFillOn ? (
+      {showStat && sx1 - sx0 > 0.5 ? (
         <div
           style={{
             position: "absolute",
             left: sx0,
             top: scy - sh / 2,
-            width: Math.max(0, sx1 - sx0),
+            width: sx1 - sx0,
             height: sh,
             borderRadius: sh / 2,
             background: `linear-gradient(90deg, ${C.orangeDeep}, ${C.orange})`,
@@ -208,7 +248,129 @@ export const AgingToAxis: React.FC = () => {
           }}
         />
       ) : null}
+
+      {/* iDental marker */}
+      {showStat && marker > 0 ? (
+        <>
+          {ripple > 0 && ripple < 1 ? (
+            <div
+              style={{
+                position: "absolute",
+                left: sx1 - 20,
+                top: scy - 20,
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                border: `3px solid ${C.orange}`,
+                transform: `scale(${1 + ripple * 2.2})`,
+                opacity: 1 - ripple,
+              }}
+            />
+          ) : null}
+          <div
+            style={{
+              position: "absolute",
+              left: sx1 - 20,
+              top: scy - 20,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              background: C.orange,
+              border: `5px solid ${C.white}`,
+              boxSizing: "border-box",
+              transform: `scale(${marker})`,
+              boxShadow: "0 0 24px rgba(244,117,33,0.8)",
+            }}
+          />
+        </>
+      ) : null}
     </>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/* The ring of six stages. It unrolls into the pipeline: the 300° arc  */
+/* through the six dots straightens onto the track.                    */
+/* ------------------------------------------------------------------ */
+
+const ARC = 300; // degrees from stage 1 to stage 6
+const SAMPLES = 120;
+
+/** Point at fraction s along the six-stage arc, u = how far it has unrolled. */
+const arcPoint = (f: number, s: number, u: number) => {
+  const theta = ((ringRot(f) - 90 + ARC * s) * Math.PI) / 180;
+  const ax = RING_C.x + RING_R * Math.cos(theta);
+  const ay = RING_C.y + RING_R * Math.sin(theta);
+  const lx = TRACK_X0 + panX(f) + (TRACK_X1 - TRACK_X0) * s;
+  return { x: lerp(ax, lx, u), y: lerp(ay, NODE_Y, u) };
+};
+
+const unrollAt = (f: number) => p(f, UNROLL[0], UNROLL[1], EASE_SINE);
+
+export const Ring: React.FC = () => {
+  const f = useCurrentFrame();
+  if (f < 174 || f > UNROLL[1] + 12) return null;
+  const draw = p(f, 178, 218, EASE_IN_OUT); // 0..1 around the full circle
+  const u = unrollAt(f);
+  const cut = 1 - p(f, UNROLL[0] - 4, UNROLL[0] + 6, EASE_IN_OUT); // the gap between stage 6 and stage 1
+  const handoff = p(f, UNROLL[1] - 8, UNROLL[1] + 8, EASE_IN_OUT); // orange line hands over to the track
+  const halo = 1 - p(f, UNROLL[0] - 6, UNROLL[0] + 6, EASE_IN_OUT);
+
+  const mainDraw = Math.min(1, (draw * 360) / ARC);
+  const cutDraw = Math.max(0, (draw * 360 - ARC) / (360 - ARC)) * cut;
+
+  const main = new Array(SAMPLES + 1).fill(0).map((_, i) => arcPoint(f, i / SAMPLES, u));
+  const cutPts = new Array(25).fill(0).map((_, i) => {
+    const theta = ((ringRot(f) - 90 + ARC + (360 - ARC) * (i / 24)) * Math.PI) / 180;
+    return { x: RING_C.x + RING_R * Math.cos(theta), y: RING_C.y + RING_R * Math.sin(theta) };
+  });
+  const toPath = (pts: { x: number; y: number }[]) =>
+    pts.map((pt, i) => `${i === 0 ? "M" : "L"}${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`).join(" ");
+
+  const stroke = interpolateColors(handoff, [0, 1], [C.orange, "rgba(255,255,255,0.2)"]);
+
+  return (
+    <svg
+      width={1920}
+      height={1080}
+      style={{ position: "absolute", left: 0, top: 0, overflow: "visible", opacity: 1 - handoff }}
+    >
+      <circle
+        cx={RING_C.x}
+        cy={RING_C.y}
+        r={RING_R + 46}
+        fill="none"
+        stroke="rgba(255,255,255,0.08)"
+        strokeWidth={1.5}
+        strokeDasharray="4 10"
+        opacity={draw * halo}
+      />
+      <path
+        d={toPath(main)}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        pathLength={1}
+        strokeDasharray={1}
+        strokeDashoffset={1 - mainDraw}
+        style={{ filter: "drop-shadow(0 0 10px rgba(244,117,33,0.6))" }}
+      />
+      {cutDraw > 0 ? (
+        <path
+          d={toPath(cutPts)}
+          fill="none"
+          stroke={C.orange}
+          strokeWidth={3}
+          strokeLinecap="round"
+          pathLength={1}
+          strokeDasharray={1}
+          strokeDashoffset={1 - cutDraw}
+          style={{ filter: "drop-shadow(0 0 10px rgba(244,117,33,0.6))" }}
+        />
+      ) : null}
+    </svg>
   );
 };
 
@@ -217,85 +379,38 @@ export const AgingToAxis: React.FC = () => {
 /* -> axis ticks.                                                      */
 /* ------------------------------------------------------------------ */
 
-export const Ring: React.FC = () => {
-  const f = useCurrentFrame();
-  if (f < 174 || f > 266) return null;
-  const draw = p(f, 178, 218, EASE_IN_OUT);
-  const fade = 1 - p(f, 248, 262, EASE_IN);
-  const rot = ringRot(f);
-  const size = RING_R * 2 + 120;
-  return (
-    <svg
-      width={size}
-      height={size}
-      style={{
-        position: "absolute",
-        left: RING_C.x - size / 2,
-        top: RING_C.y - size / 2,
-        opacity: fade,
-        transform: `rotate(${rot}deg)`,
-      }}
-    >
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={RING_R + 46}
-        fill="none"
-        stroke="rgba(255,255,255,0.08)"
-        strokeWidth={1.5}
-        strokeDasharray="4 10"
-        opacity={draw}
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={RING_R}
-        fill="none"
-        stroke={C.orange}
-        strokeWidth={3}
-        strokeLinecap="round"
-        pathLength={1}
-        strokeDasharray={1}
-        strokeDashoffset={1 - draw}
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        style={{ filter: "drop-shadow(0 0 10px rgba(244,117,33,0.6))" }}
-      />
-    </svg>
-  );
-};
-
 export const Nodes: React.FC = () => {
   const f = useCurrentFrame();
   if (f < 180) return null;
-  const pan = panX(f);
-  const gone = p(f, PROOF_EXIT, PROOF_EXIT + 14, EASE_IN);
+  const gone = p(f, PROOF_EXIT, PROOF_EXIT + 14, EASE_IN_OUT);
   if (gone >= 1) return null;
+
+  const u = unrollAt(f);
+  const ta = p(f, TO_AXIS[0], TO_AXIS[1], EASE_IN_OUT);
+  const ay = axisY(f);
 
   return (
     <>
-      {NODE_X.map((nx, k) => {
+      {NODE_X.map((_, k) => {
         const appear = p(f, 186 + k * 5, 200 + k * 5, EASE_POP);
         if (appear <= 0) return null;
-        const a = ((ringRot(f) - 90 + 60 * k) * Math.PI) / 180;
-        const ringPos = { x: RING_C.x + RING_R * Math.cos(a), y: RING_C.y + RING_R * Math.sin(a) };
-        const fly = p(f, 250 + k * 2, 278 + k * 2, EASE_IN_OUT);
         const lit = p(f, ARRIVE[k], ARRIVE[k] + 10, EASE_OUT);
         const checkDraw = p(f, ARRIVE[k] + 2, ARRIVE[k] + 14, EASE_OUT);
         const ripple = p(f, ARRIVE[k], ARRIVE[k] + 22, EASE_OUT);
-        const tick = p(f, 450 + k * 2, 476 + k * 2, EASE_IN_OUT);
+        // Shape change is staggered; position is not, so the row stays on the line.
+        const tick = p(f, TO_AXIS[0] + k, TO_AXIS[1] - 4 + k, EASE_IN_OUT);
 
-        const nodePos = { x: nx + pan, y: NODE_Y };
-        const tickPos = { x: axisX(90 + 2 * k), y: axisY(f) + 30 };
-        const x = lerp(lerp(ringPos.x, nodePos.x, fly), tickPos.x, tick);
-        const y = lerp(lerp(ringPos.y, nodePos.y, fly), tickPos.y, tick);
+        const onLine = arcPoint(f, k / 5, u);
+        const x = lerp(onLine.x, axisX(90 + 2 * k), ta);
+        const y = lerp(onLine.y, ay, ta) + 30 * tick;
 
-        const d = lerp(22, 34, fly);
+        const d = lerp(22, 34, u);
         const w = lerp(d, 3, tick);
         const hgt = lerp(d, 18, tick);
         const radius = lerp(d / 2, 1.5, tick);
 
         // ring (orange) -> unlit stage -> lit stage -> tick (white)
-        const unlit = fly * (1 - lit);
+        const unlit = u * (1 - lit);
         const fill =
           tick > 0
             ? interpolateColors(tick, [0, 1], [C.orange, "rgba(255,255,255,0.5)"])
@@ -332,8 +447,8 @@ export const Nodes: React.FC = () => {
                 boxSizing: "border-box",
                 transform: `scale(${appear * (1 + 0.25 * Math.sin(Math.PI * lit))})`,
                 boxShadow:
-                  tick < 1 && (lit > 0 || fly < 1)
-                    ? `0 0 ${16 * (1 - tick)}px rgba(244,117,33,${0.7 * (1 - tick)})`
+                  tick < 1 && (lit > 0 || u < 1)
+                    ? `0 0 ${16 * (1 - tick)}px rgba(244,117,33,${0.7 * (1 - tick) * Math.max(lit, 1 - u)})`
                     : undefined,
                 display: "flex",
                 alignItems: "center",
@@ -356,13 +471,14 @@ export const Nodes: React.FC = () => {
 
 export const StageLabels: React.FC = () => {
   const f = useCurrentFrame();
-  if (f < 270 || f > 466) return null;
+  if (f < 262 || f > TO_AXIS[0] + 16) return null;
   const pan = panX(f);
-  const out = p(f, 446, 460, EASE_IN);
+  const out = p(f, TO_AXIS[0] - 4, TO_AXIS[0] + 10, EASE_IN);
+  const outFade = p(f, TO_AXIS[0] - 4, TO_AXIS[0] + 10, EASE_IN_OUT);
   return (
     <>
       {STAGES.map((s, k) => {
-        const intro = p(f, 276 + k * 3, 292 + k * 3, EASE_OUT);
+        const intro = p(f, 268 + k * 3, 284 + k * 3, EASE_OUT);
         const lit = p(f, ARRIVE[k], ARRIVE[k] + 10, EASE_OUT);
         return (
           <div
@@ -374,7 +490,7 @@ export const StageLabels: React.FC = () => {
               width: 280,
               textAlign: "center",
               fontFamily: inter,
-              opacity: intro * (0.34 + 0.66 * lit) * (1 - out),
+              opacity: intro * (0.34 + 0.66 * lit) * (1 - outFade),
             }}
           >
             <div

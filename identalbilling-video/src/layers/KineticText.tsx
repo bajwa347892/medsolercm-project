@@ -1,7 +1,7 @@
 import React from "react";
 import { useCurrentFrame } from "remotion";
 import { C, inter } from "../theme";
-import { EASE_IN, EASE_OUT, p } from "../timeline";
+import { EASE_IN, EASE_IN_OUT, EASE_OUT, p } from "../timeline";
 
 type Props = {
   /** Use "\n" for line breaks and *asterisks* to mark accent words. */
@@ -47,7 +47,9 @@ export const KineticText: React.FC<Props> = ({
   if (frame < start - 1) return null;
   if (exit !== undefined && frame > exit + EXIT_DUR + 1) return null;
 
+  // Motion accelerates away; opacity fades evenly so nothing pops off.
   const exitP = exit === undefined ? 0 : p(frame, exit, exit + EXIT_DUR, EASE_IN);
+  const fadeP = exit === undefined ? 0 : p(frame, exit, exit + EXIT_DUR, EASE_IN_OUT);
   const pad = size * 0.16;
 
   let wordIndex = 0;
@@ -67,7 +69,7 @@ export const KineticText: React.FC<Props> = ({
         letterSpacing: tracking,
         lineHeight,
         color,
-        opacity: 1 - exitP,
+        opacity: 1 - fadeP,
         transform: `translateY(${-30 * exitP}px)`,
         filter: exitP > 0 ? `blur(${exitP * 8}px)` : undefined,
       }}

@@ -10,16 +10,18 @@ Final render: `out/iDentalBilling-25s.mp4`
 |---|---|---|
 | 0.0–5.0s | Problem | "Denied claims pile up." / "AR ages while your team sits on hold." |
 | 5.0–9.0s | Turn | "iDental Billing" / "One team runs the full revenue cycle." / "Nothing gets lost between handoffs." |
-| 9.0–16.0s | Process | "Every claim, start to finish." / six pipeline stages / "Here's what that looks like in numbers." |
+| 9.0–16.0s | Process | "Every claim, start to finish." / six pipeline stages: Insurance verified, CDT coded, Clean claim sent, Payment posted, Denial appealed, AR worked |
 | 16.0–21.0s | Proof | 98.7% net collection rate vs. industry average 91% to 95%; 98% clean claim rate; 21 days average in AR |
 | 21.0–25.0s | Payoff | "Good dentistry deserves better billing." / iDental Billing / "Get your free billing review" / "No setup fees. No long-term contracts." |
 
 The piece is one continuous take. Elements carry across scenes instead of cutting:
 
-- the top denied claim card flips into a clean claim, then rides the pipeline
+- the top denied claim card flips into a clean claim, rides the pipeline, then glides into the 98.7% figure
 - the aging-report bar shrinks into the pipeline track, which becomes the chart axis
-- the six ring dots become the six pipeline stages, then the axis ticks
-- the 98.7% bar becomes the accent rule under the closing line
+- the "one team" ring unrolls into the pipeline; its six stage dots become the axis ticks
+- the 98.7% bar and its marker become the accent rule under the closing line
+
+Every scene-to-scene morph runs 0.4 to 0.8 seconds, and every headline stays readable for at least 1.5 seconds after it lands.
 
 ## Project layout
 

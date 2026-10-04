@@ -7,21 +7,28 @@ import {
   EASE_IN,
   EASE_IN_OUT,
   EASE_OUT,
-  EASE_POP,
   EASE_SOFT,
-  PROOF_EXIT,
-  axisX,
   NCR,
+  PROOF_EXIT,
+  TO_AXIS,
+  axisX,
   axisY,
   p,
   statShift,
   statValue,
 } from "../timeline";
 
+/**
+ * The band, the stat fill and the iDental marker live in Flow.tsx (they are
+ * the same elements as the pipeline track). This layer holds the numbers and
+ * labels that sit on top of them.
+ */
+
 const exitStyle = (f: number, delay = 0): React.CSSProperties => {
   const e = p(f, PROOF_EXIT + delay, PROOF_EXIT + delay + 12, EASE_IN);
+  const fade = p(f, PROOF_EXIT + delay, PROOF_EXIT + delay + 12, EASE_IN_OUT);
   return {
-    opacity: 1 - e,
+    opacity: 1 - fade,
     transform: `translateY(${-24 * e}px)`,
     filter: e > 0 ? `blur(${6 * e}px)` : undefined,
   };
@@ -29,28 +36,27 @@ const exitStyle = (f: number, delay = 0): React.CSSProperties => {
 
 export const Proof: React.FC = () => {
   const f = useCurrentFrame();
-  if (f < 470 || f > PROOF_EXIT + 30) return null;
+  if (f < TO_AXIS[0] || f > PROOF_EXIT + 30) return null;
 
   const shift = statShift(f);
   const ay = axisY(f);
   const v = statValue(f);
-  const settle = p(f, COUNT_END, COUNT_END + 14, EASE_OUT);
-  const numIn = p(f, 482, 498, EASE_OUT);
+
+  // The number resolves out of the travelling claim, counts, then lands.
+  const numIn = p(f, 476, 492, EASE_OUT);
+  const settle = p(f, COUNT_END - 8, COUNT_END + 6, EASE_OUT);
   const pop = Math.sin(Math.PI * settle) * 0.035;
 
-  const band = p(f, 494, 514, EASE_IN_OUT);
   const bandLabel = p(f, 500, 516, EASE_OUT);
-  const marker = p(f, 486, 498, EASE_POP);
-  const markerLabel = p(f, 526, 540, EASE_OUT);
-  const bracket = p(f, 538, 558, EASE_IN_OUT);
-  const ripple = p(f, COUNT_END, COUNT_END + 24, EASE_OUT);
-  const tickLabels = p(f, 474, 492, EASE_OUT);
+  const markerLabel = p(f, 506, 520, EASE_OUT);
+  const bracket = p(f, 514, 532, EASE_IN_OUT);
 
-  // Secondary stats
-  const secIn = p(f, 556, 578, EASE_OUT);
-  const divider = p(f, 560, 580, EASE_IN_OUT);
-  const ccr = Math.round(98 * p(f, 560, 586, EASE_SOFT));
-  const ar = Math.round(21 * p(f, 562, 588, EASE_SOFT));
+  // Secondary stats arrive once 98.7% has had its beat.
+  const divider = p(f, 544, 564, EASE_IN_OUT);
+  const ccr = Math.round(98 * p(f, 544, 566, EASE_SOFT));
+  const ar = Math.round(21 * p(f, 546, 568, EASE_SOFT));
+
+  const gap = axisX(NCR) - axisX(95);
 
   return (
     <>
@@ -58,7 +64,7 @@ export const Proof: React.FC = () => {
       <div style={{ position: "absolute", inset: 0, transform: `translateY(${shift}px)` }}>
         <KineticText
           text="Net collection rate"
-          start={482}
+          start={480}
           exit={PROOF_EXIT}
           x={960}
           y={148}
@@ -93,7 +99,7 @@ export const Proof: React.FC = () => {
           style={{
             display: "inline-block",
             opacity: numIn,
-            transform: `translateY(${(1 - numIn) * 40}px) scale(${1 + pop})`,
+            transform: `translateY(${(1 - numIn) * 30}px) scale(${(0.92 + 0.08 * numIn) * (1 + pop)})`,
             filter: numIn < 1 ? `blur(${(1 - numIn) * 10}px)` : undefined,
             textShadow: `0 0 ${60 * settle}px rgba(244,117,33,${0.25 * Math.sin(Math.PI * settle)})`,
           }}
@@ -103,21 +109,8 @@ export const Proof: React.FC = () => {
         </div>
       </div>
 
-      {/* industry average band */}
+      {/* chart labels */}
       <div style={{ position: "absolute", inset: 0, ...exitStyle(f, 2) }}>
-        <div
-          style={{
-            position: "absolute",
-            left: axisX(91),
-            top: ay - 19,
-            width: (axisX(95) - axisX(91)) * band,
-            height: 38,
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.13)",
-            border: band > 0 ? "1.5px dashed rgba(255,255,255,0.45)" : "none",
-            boxSizing: "border-box",
-          }}
-        />
         <div
           style={{
             position: "absolute",
@@ -128,7 +121,7 @@ export const Proof: React.FC = () => {
             fontFamily: inter,
             fontSize: 28,
             fontWeight: 500,
-            color: "rgba(255,255,255,0.7)",
+            color: "rgba(255,255,255,0.72)",
             opacity: bandLabel,
           }}
         >
@@ -138,16 +131,17 @@ export const Proof: React.FC = () => {
         {/* the gap, made visible */}
         {bracket > 0 ? (
           <svg
-            width={axisX(NCR) - axisX(95) + 4}
-            height={40}
+            width={gap + 4}
+            height={24}
             style={{ position: "absolute", left: axisX(95) - 2, top: ay - 46 }}
           >
             <path
-              d={`M2 30 L2 14 L${axisX(NCR) - axisX(95) + 2} 14 L${axisX(NCR) - axisX(95) + 2} 30`}
+              d={`M2 20 L2 8 L${gap + 2} 8 L${gap + 2} 20`}
               fill="none"
               stroke={C.orange}
               strokeWidth={2.5}
               strokeLinejoin="round"
+              strokeLinecap="round"
               pathLength={1}
               strokeDasharray={1}
               strokeDashoffset={1 - bracket}
@@ -155,78 +149,46 @@ export const Proof: React.FC = () => {
           </svg>
         ) : null}
 
-        {/* iDental marker */}
-        {f >= 486 ? (
-          <>
-            {ripple > 0 && ripple < 1 ? (
-              <div
-                style={{
-                  position: "absolute",
-                  left: axisX(v) - 20,
-                  top: ay - 20,
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  border: `3px solid ${C.orange}`,
-                  transform: `scale(${1 + ripple * 2.2})`,
-                  opacity: 1 - ripple,
-                }}
-              />
-            ) : null}
-            <div
-              style={{
-                position: "absolute",
-                left: axisX(v) - 20,
-                top: ay - 20,
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                background: C.orange,
-                border: `5px solid ${C.white}`,
-                boxSizing: "border-box",
-                transform: `scale(${marker})`,
-                boxShadow: "0 0 24px rgba(244,117,33,0.8)",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: axisX(NCR) - 200,
-                width: 400,
-                top: ay - 82 + (1 - markerLabel) * 12,
-                textAlign: "center",
-                fontFamily: inter,
-                fontSize: 28,
-                fontWeight: 700,
-                color: C.orange,
-                opacity: markerLabel,
-              }}
-            >
-              iDental Billing
-            </div>
-          </>
-        ) : null}
+        <div
+          style={{
+            position: "absolute",
+            left: axisX(NCR) - 200,
+            width: 400,
+            top: ay - 82 + (1 - markerLabel) * 12,
+            textAlign: "center",
+            fontFamily: inter,
+            fontSize: 28,
+            fontWeight: 700,
+            color: C.orange,
+            opacity: markerLabel,
+          }}
+        >
+          iDental Billing
+        </div>
 
         {/* tick labels */}
-        {[90, 92, 94, 96, 98, 100].map((t, i) => (
-          <div
-            key={t}
-            style={{
-              position: "absolute",
-              left: axisX(t) - 60,
-              width: 120,
-              top: ay + 48 + (1 - tickLabels) * 10,
-              textAlign: "center",
-              fontFamily: mono,
-              fontSize: 21,
-              fontWeight: 500,
-              color: "rgba(255,255,255,0.55)",
-              opacity: p(f, 474 + i * 2, 490 + i * 2, EASE_OUT),
-            }}
-          >
-            {t}%
-          </div>
-        ))}
+        {[90, 92, 94, 96, 98, 100].map((t, i) => {
+          const tl = p(f, 466 + i * 2, 482 + i * 2, EASE_OUT);
+          return (
+            <div
+              key={t}
+              style={{
+                position: "absolute",
+                left: axisX(t) - 60,
+                width: 120,
+                top: ay + 48 + (1 - tl) * 10,
+                textAlign: "center",
+                fontFamily: mono,
+                fontSize: 21,
+                fontWeight: 500,
+                color: "rgba(255,255,255,0.55)",
+                opacity: tl,
+              }}
+            >
+              {t}%
+            </div>
+          );
+        })}
       </div>
 
       {/* secondary stats */}
@@ -235,7 +197,7 @@ export const Proof: React.FC = () => {
           style={{
             position: "absolute",
             left: 959,
-            top: 800,
+            top: 825,
             width: 2,
             height: 150 * divider,
             background: "rgba(255,255,255,0.18)",
@@ -245,7 +207,7 @@ export const Proof: React.FC = () => {
           { x: 640, value: `${ccr}`, unit: "%", label: "Clean claim rate", d: 0 },
           { x: 1280, value: `${ar}`, unit: " days", label: "Average in AR", d: 4 },
         ].map((s) => {
-          const t = p(f, 556 + s.d, 578 + s.d, EASE_OUT);
+          const t = p(f, 542 + s.d, 562 + s.d, EASE_OUT);
           return (
             <div
               key={s.label}
@@ -253,10 +215,10 @@ export const Proof: React.FC = () => {
                 position: "absolute",
                 left: s.x - 320,
                 width: 640,
-                top: 790 + (1 - t) * 40,
+                top: 815 + (1 - t) * 40,
                 textAlign: "center",
                 fontFamily: inter,
-                opacity: t * secIn,
+                opacity: t,
               }}
             >
               <div
@@ -298,4 +260,3 @@ export const Proof: React.FC = () => {
     </>
   );
 };
-

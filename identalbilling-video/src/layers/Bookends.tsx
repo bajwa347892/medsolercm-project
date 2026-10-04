@@ -1,8 +1,8 @@
 import React from "react";
 import { useCurrentFrame } from "remotion";
 import { KineticText } from "./KineticText";
-import { C, inter, mono } from "../theme";
-import { EASE_IN, EASE_OUT, EASE_POP, p } from "../timeline";
+import { C, inter } from "../theme";
+import { EASE_IN, EASE_IN_OUT, EASE_OUT, EASE_POP, p } from "../timeline";
 
 /* ------------------------------------------------------------------ */
 /* Scene 1: the front desk, stuck on hold                              */
@@ -16,10 +16,8 @@ export const HoldPill: React.FC = () => {
   const START = 88;
   if (f < START || f > 166) return null;
   const inP = p(f, START, START + 14, EASE_OUT);
-  const out = p(f, 146, 158, EASE_IN);
-  const secs = 42 * 60 + 7 + Math.floor((f - START) / 30);
-  const mm = String(Math.floor(secs / 60)).padStart(2, "0");
-  const ss = String(secs % 60).padStart(2, "0");
+  const out = p(f, 152, 164, EASE_IN);
+  const outFade = p(f, 152, 164, EASE_IN_OUT);
   return (
     <div
       style={{
@@ -35,7 +33,7 @@ export const HoldPill: React.FC = () => {
         background: "rgba(255,255,255,0.06)",
         border: "1.5px solid rgba(255,255,255,0.12)",
         fontFamily: inter,
-        opacity: inP * (1 - out),
+        opacity: inP * (1 - outFade),
         filter: out > 0 ? `blur(${out * 6}px)` : undefined,
       }}
     >
@@ -58,17 +56,6 @@ export const HoldPill: React.FC = () => {
           />
         ))}
       </div>
-      <div
-        style={{
-          fontFamily: mono,
-          fontSize: 24,
-          fontWeight: 500,
-          color: C.g1,
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {mm}:{ss}
-      </div>
     </div>
   );
 };
@@ -80,7 +67,7 @@ export const HoldPill: React.FC = () => {
 export const BrandEyebrow: React.FC = () => {
   const f = useCurrentFrame();
   if (f < 156 || f > 266) return null;
-  const bar = p(f, 160, 174, EASE_OUT);
+  const bar = p(f, 164, 178, EASE_OUT);
   const out = p(f, 250, 262, EASE_IN);
   return (
     <>
@@ -100,7 +87,7 @@ export const BrandEyebrow: React.FC = () => {
       />
       <KineticText
         text="iDental Billing"
-        start={162}
+        start={166}
         exit={250}
         x={168}
         y={296}
@@ -125,7 +112,7 @@ export const Closing: React.FC = () => {
   if (f < 630) return null;
   const cta = p(f, 674, 692, EASE_POP);
   const ctaFade = p(f, 672, 686, EASE_OUT);
-  const shine = p(f, 712, 742, EASE_OUT);
+  const shine = p(f, 712, 736, EASE_IN_OUT);
   const nudge = Math.sin(Math.max(0, f - 700) / 6) * 4 * p(f, 700, 712);
   const glow = p(f, 680, 720, EASE_OUT);
   const footer = p(f, 688, 704, EASE_OUT);
@@ -203,22 +190,6 @@ export const Closing: React.FC = () => {
             boxShadow: `0 18px 50px rgba(244,117,33,${0.35 * glow}), 0 0 0 ${10 * (1 - glow)}px rgba(244,117,33,${0.25 * (1 - glow)})`,
           }}
         >
-          Get your free billing review
-          <svg
-            width={34}
-            height={34}
-            viewBox="0 0 24 24"
-            style={{ transform: `translateX(${nudge}px)` }}
-          >
-            <path
-              d={ARROW}
-              fill="none"
-              stroke={C.navy}
-              strokeWidth={2.6}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
           {shine > 0 && shine < 1 ? (
             <div
               style={{
@@ -233,6 +204,24 @@ export const Closing: React.FC = () => {
               }}
             />
           ) : null}
+          <span style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 18 }}>
+            Get your free billing review
+            <svg
+              width={34}
+              height={34}
+              viewBox="0 0 24 24"
+              style={{ transform: `translateX(${nudge}px)` }}
+            >
+              <path
+                d={ARROW}
+                fill="none"
+                stroke={C.navy}
+                strokeWidth={2.6}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
         </div>
       </div>
 

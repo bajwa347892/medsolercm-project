@@ -31,11 +31,11 @@ export const IDentalBilling: React.FC = () => {
       <Background />
       <AbsoluteFill style={{ transform: `scale(${scale})`, transformOrigin: "50% 50%" }}>
         {/* 1. The problem */}
-        <KineticText text={"Denied claims\npile up."} start={2} exit={70} x={140} y={360} size={88} weight={800} />
+        <KineticText text={"Denied claims\npile up."} start={2} exit={68} x={140} y={360} size={88} weight={800} />
         <KineticText
           text={"AR ages while your\nteam sits on hold."}
-          start={76}
-          exit={152}
+          start={78}
+          exit={158}
           x={140}
           y={360}
           size={88}
@@ -68,17 +68,7 @@ export const IDentalBilling: React.FC = () => {
         <Ring />
 
         {/* 3. The process */}
-        <KineticText text="Every claim, start to finish." start={282} exit={392} x={960} y={226} size={84} weight={800} align="center" />
-        <KineticText
-          text="Here's what that looks like in numbers."
-          start={400}
-          exit={474}
-          x={960}
-          y={232}
-          size={72}
-          weight={800}
-          align="center"
-        />
+        <KineticText text="Every claim, start to finish." start={274} exit={440} x={960} y={226} size={84} weight={800} align="center" />
 
         {/* Persistent, morphing elements */}
         <AgingToAxis />

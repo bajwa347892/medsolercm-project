@@ -8,12 +8,13 @@
 import { Config } from "@remotion/cli/config";
 
 Config.setRspack(true);
-Config.setVideoImageFormat("jpeg");
-Config.setJpegQuality(95);
+// PNG frames for the master: no JPEG ringing on thin strokes and small labels.
+Config.setVideoImageFormat("png");
 Config.setOverwriteOutput(true);
 Config.setCodec("h264");
 Config.setCrf(16);
 Config.setPixelFormat("yuv420p");
+Config.setColorSpace("bt709");
 
 // Use the preinstalled headless shell instead of downloading one.
 if (process.env.REMOTION_BROWSER) {

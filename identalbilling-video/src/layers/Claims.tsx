@@ -1,5 +1,5 @@
 import React from "react";
-import { useCurrentFrame } from "remotion";
+import { Easing, useCurrentFrame } from "remotion";
 import { ClaimCard } from "./ClaimCard";
 import {
   CARD_FLY,
@@ -13,10 +13,11 @@ import {
   FLIP_END,
   FLIP_START,
   HERO,
-  NODE_X,
+  HERO_TO_RIDE,
   PILE,
   PILE_C,
   RING_C,
+  TO_AXIS,
   cardRide,
   lerp,
   p,
@@ -24,6 +25,8 @@ import {
   pileDrift,
   pileShake,
 } from "../timeline";
+
+const EASE_SINE = Easing.inOut(Easing.sin);
 
 const place = (x: number, y: number) => ({
   position: "absolute" as const,
@@ -85,7 +88,7 @@ export const Claims: React.FC = () => {
     if (f < c.t || f > 175) return null;
     const pos = flyIn(i, f);
     // Fall away when iDental Billing takes over.
-    const e = p(f, 136 + i * 1.6, 160 + i * 1.6, EASE_IN);
+    const e = p(f, 140 + i, 158 + i, EASE_IN);
     const dir = i % 2 === 0 ? -1 : 1;
     return (
       <div
@@ -125,19 +128,21 @@ export const Claims: React.FC = () => {
     r = lerp(from.r, 0, m);
     scale = lerp(1, 1.12, m);
   } else {
-    const m = p(f, 250, 280, EASE_IN_OUT);
+    const m = p(f, HERO_TO_RIDE[0], HERO_TO_RIDE[1], EASE_SINE);
     const ride = cardRide(f);
     const bobEnd = Math.sin((250 - 172) / 16) * 5;
-    const rideX = (f < 282 ? NODE_X[0] : ride.x) + panX(f);
+    const rideX = ride.x + panX(f);
     const rideY = CARD_RIDE_Y - ride.hop * 16;
     x = lerp(RING_C.x, rideX, m);
     y = lerp(RING_C.y + bobEnd, rideY, m);
     r = ride.hop * 3;
     scale = lerp(1.12, CARD_RIDE_SCALE, m);
-    // Resolve into the stat.
-    const out = p(f, 448, 466, EASE_IN);
-    scale *= 1 - 0.35 * out;
-    opacity = 1 - out;
+    // The claim resolves into the first stat: it glides to where 98.7% appears.
+    const out = p(f, TO_AXIS[0] - 2, TO_AXIS[0] + 34, EASE_SINE);
+    x = lerp(x, 960, out);
+    y = lerp(y, 380, out);
+    scale *= lerp(1, 0.3, out);
+    opacity = 1 - p(f, TO_AXIS[0] + 20, TO_AXIS[0] + 36, EASE_IN_OUT);
   }
 
   const flip = p(f, FLIP_START, FLIP_END, EASE_IN_OUT);

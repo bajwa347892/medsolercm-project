@@ -92,14 +92,21 @@ export const FLIP_END = 172;
 /* Scene 3: the pipeline                                               */
 /* ------------------------------------------------------------------ */
 
+// Morph windows. Every scene-to-scene morph stays within 0.4-0.8s.
+export const HERO_TO_RIDE: [number, number] = [250, 274];
+export const UNROLL: [number, number] = [248, 272];
+export const BAR_THIN: [number, number] = [250, 258];
+export const BAR_RISE: [number, number] = [254, 274];
+export const TO_AXIS: [number, number] = [450, 472];
+
 export const NODE_Y = 640;
 export const NODE_X = [220, 516, 812, 1108, 1404, 1700];
 export const TRACK_X0 = NODE_X[0];
 export const TRACK_X1 = NODE_X[NODE_X.length - 1];
-export const ARRIVE = [292, 316, 340, 364, 388, 412];
-export const DWELL = 8;
-export const CARD_RIDE_Y = NODE_Y - 92;
-export const CARD_RIDE_SCALE = 0.42;
+export const ARRIVE = [280, 300, 320, 340, 360, 380];
+export const DWELL = 6;
+export const CARD_RIDE_Y = NODE_Y - 118;
+export const CARD_RIDE_SCALE = 0.58;
 
 export const STAGES = [
   "Insurance\nverified",
@@ -112,7 +119,7 @@ export const STAGES = [
 
 /** Camera pan that tracks the claim along the pipeline. */
 export const panX = (f: number) =>
-  interpolate(f, [282, 420, 450, 476], [0, -36, -36, 0], {
+  interpolate(f, [282, 384, TO_AXIS[0], TO_AXIS[1]], [0, -36, -36, 0], {
     ...clamp,
     easing: EASE_IN_OUT,
   });
@@ -145,13 +152,13 @@ export const axisX = (v: number) =>
   AXIS_X0 + ((AXIS_X1 - AXIS_X0) * (v - AXIS_MIN)) / (AXIS_MAX - AXIS_MIN);
 
 /** The proof block sits centered, then lifts to make room for two more stats. */
-export const statShift = (f: number) => 70 * (1 - p(f, 552, 580, EASE_IN_OUT));
-export const AXIS_BASE_Y = 650;
+export const statShift = (f: number) => 70 * (1 - p(f, 540, 562, EASE_IN_OUT));
+export const AXIS_BASE_Y = 625;
 export const axisY = (f: number) => AXIS_BASE_Y + statShift(f);
 
 export const NCR = 98.7;
-export const COUNT_START = 490;
-export const COUNT_END = 534;
+export const COUNT_START = 484;
+export const COUNT_END = 518;
 export const statValue = (f: number) =>
   AXIS_MIN + (NCR - AXIS_MIN) * p(f, COUNT_START, COUNT_END, EASE_SOFT);
 
@@ -160,4 +167,5 @@ export const statValue = (f: number) =>
 /* ------------------------------------------------------------------ */
 
 export const RULE = { cx: 960, y: 556, w: 140, h: 8 };
+export const TO_RULE: [number, number] = [622, 644];
 export const PROOF_EXIT = 618;
