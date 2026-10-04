@@ -68,7 +68,7 @@ export const BrandEyebrow: React.FC = () => {
   const f = useCurrentFrame();
   if (f < 156 || f > 266) return null;
   const bar = p(f, 164, 178, EASE_OUT);
-  const out = p(f, 250, 262, EASE_IN);
+  const out = p(f, 244, 254, EASE_IN_OUT);
   return (
     <>
       <div
@@ -88,7 +88,7 @@ export const BrandEyebrow: React.FC = () => {
       <KineticText
         text="iDental Billing"
         start={166}
-        exit={250}
+        exit={244}
         x={168}
         y={296}
         size={44}
@@ -187,7 +187,7 @@ export const Closing: React.FC = () => {
             letterSpacing: "-0.01em",
             opacity: ctaFade,
             transform: `scale(${0.86 + 0.14 * cta})`,
-            boxShadow: `0 18px 50px rgba(244,117,33,${0.35 * glow}), 0 0 0 ${10 * (1 - glow)}px rgba(244,117,33,${0.25 * (1 - glow)})`,
+            boxShadow: `0 18px 50px rgba(244,117,33,${0.35 * glow}), 0 0 ${28 * (1 - glow)}px rgba(244,117,33,${0.45 * (1 - glow) * ctaFade})`,
           }}
         >
           {shine > 0 && shine < 1 ? (

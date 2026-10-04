@@ -73,7 +73,7 @@ export const AgingToAxis: React.FC = () => {
 
   // Morph timings
   const thin = p(f, BAR_THIN[0], BAR_THIN[1], EASE_IN_OUT); // bar thins to a line
-  const travel = p(f, BAR_RISE[0], BAR_RISE[1], EASE_IN_OUT); // line rises and stretches into the track
+  const travel = p(f, BAR_RISE[0], BAR_RISE[1], EASE_SINE); // line rises into the track as the ring lands
   const toAxis = p(f, TO_AXIS[0], TO_AXIS[1], EASE_IN_OUT); // track becomes the chart axis
   const gone = p(f, PROOF_EXIT, PROOF_EXIT + 14, EASE_IN_OUT);
 
@@ -108,7 +108,7 @@ export const AgingToAxis: React.FC = () => {
   const showStat = f >= TO_AXIS[1];
 
   // Marker rides the end of the bar, and shrinks away as the bar becomes the rule.
-  const marker = p(f, TO_AXIS[1], TO_AXIS[1] + 12, EASE_POP) * (1 - p(f, TO_RULE[0], TO_RULE[0] + 12, EASE_IN));
+  const marker = p(f, TO_AXIS[1], TO_AXIS[1] + 12, EASE_POP) * (1 - p(f, TO_RULE[0], TO_RULE[0] + 12, EASE_IN_OUT));
   const ripple = p(f, COUNT_END - 8, COUNT_END + 16, EASE_OUT);
 
   const trackColor =
@@ -296,9 +296,13 @@ export const AgingToAxis: React.FC = () => {
 const ARC = 300; // degrees from stage 1 to stage 6
 const SAMPLES = 120;
 
-/** Point at fraction s along the six-stage arc, u = how far it has unrolled. */
+/**
+ * Point at fraction s along the six-stage arc, u = how far it has unrolled.
+ * The arc runs counter-clockwise from upper left, down and round to upper
+ * right, so it opens into the left-to-right track as a widening U.
+ */
 const arcPoint = (f: number, s: number, u: number) => {
-  const theta = ((ringRot(f) - 90 + ARC * s) * Math.PI) / 180;
+  const theta = ((ringRot(f) - 120 - ARC * s) * Math.PI) / 180;
   const ax = RING_C.x + RING_R * Math.cos(theta);
   const ay = RING_C.y + RING_R * Math.sin(theta);
   const lx = TRACK_X0 + panX(f) + (TRACK_X1 - TRACK_X0) * s;
@@ -321,7 +325,7 @@ export const Ring: React.FC = () => {
 
   const main = new Array(SAMPLES + 1).fill(0).map((_, i) => arcPoint(f, i / SAMPLES, u));
   const cutPts = new Array(25).fill(0).map((_, i) => {
-    const theta = ((ringRot(f) - 90 + ARC + (360 - ARC) * (i / 24)) * Math.PI) / 180;
+    const theta = ((ringRot(f) - 120 - ARC - (360 - ARC) * (i / 24)) * Math.PI) / 180;
     return { x: RING_C.x + RING_R * Math.cos(theta), y: RING_C.y + RING_R * Math.sin(theta) };
   });
   const toPath = (pts: { x: number; y: number }[]) =>
@@ -410,7 +414,7 @@ export const Nodes: React.FC = () => {
         const radius = lerp(d / 2, 1.5, tick);
 
         // ring (orange) -> unlit stage -> lit stage -> tick (white)
-        const unlit = u * (1 - lit);
+        const unlit = p(u, 0.6, 1) * (1 - lit);
         const fill =
           tick > 0
             ? interpolateColors(tick, [0, 1], [C.orange, "rgba(255,255,255,0.5)"])

@@ -43,7 +43,7 @@ export const Proof: React.FC = () => {
   const v = statValue(f);
 
   // The number resolves out of the travelling claim, counts, then lands.
-  const numIn = p(f, 476, 492, EASE_OUT);
+  const numIn = p(f, 466, 480, EASE_OUT);
   const settle = p(f, COUNT_END - 8, COUNT_END + 6, EASE_OUT);
   const pop = Math.sin(Math.PI * settle) * 0.035;
 
@@ -64,7 +64,7 @@ export const Proof: React.FC = () => {
       <div style={{ position: "absolute", inset: 0, transform: `translateY(${shift}px)` }}>
         <KineticText
           text="Net collection rate"
-          start={480}
+          start={468}
           exit={PROOF_EXIT}
           x={960}
           y={148}

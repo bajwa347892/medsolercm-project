@@ -96,7 +96,7 @@ export const Claims: React.FC = () => {
         style={{
           ...place(pos.x + dir * 60 * e, pos.y + 460 * e),
           transform: `rotate(${pos.r + dir * 14 * e}deg) scale(${1 - 0.1 * e})`,
-          opacity: 1 - e,
+          opacity: 1 - p(f, 140 + i, 158 + i, EASE_IN_OUT),
           filter: `brightness(${depthDim(i, f)})${e > 0 ? ` blur(${e * 6}px)` : ""}`,
         }}
       >
@@ -113,6 +113,7 @@ export const Claims: React.FC = () => {
   let r: number;
   let scale = 1;
   let opacity = 1;
+  let soften = 0;
 
   if (f < 140) {
     const pos = flyIn(HERO, f);
@@ -138,11 +139,13 @@ export const Claims: React.FC = () => {
     r = ride.hop * 3;
     scale = lerp(1.12, CARD_RIDE_SCALE, m);
     // The claim resolves into the first stat: it glides to where 98.7% appears.
-    const out = p(f, TO_AXIS[0] - 2, TO_AXIS[0] + 34, EASE_SINE);
+    const out = p(f, TO_AXIS[0], TO_AXIS[1], EASE_SINE);
     x = lerp(x, 960, out);
     y = lerp(y, 380, out);
-    scale *= lerp(1, 0.3, out);
-    opacity = 1 - p(f, TO_AXIS[0] + 20, TO_AXIS[0] + 36, EASE_IN_OUT);
+    scale *= lerp(1, 0.2, out);
+    // Dissolve just before the number fades in, so they never overlap.
+    opacity = 1 - p(f, TO_AXIS[0] + 4, TO_AXIS[0] + 16, EASE_IN_OUT);
+    soften = p(f, TO_AXIS[0] + 4, TO_AXIS[0] + 16, EASE_IN_OUT);
   }
 
   const flip = p(f, FLIP_START, FLIP_END, EASE_IN_OUT);
@@ -159,7 +162,12 @@ export const Claims: React.FC = () => {
           ...place(x, y),
           transform: `perspective(1800px) rotate(${r}deg) scale(${scale * (1 + 0.1 * lift)}) rotateY(${faceAngle}deg)`,
           opacity,
-          filter: !showBack && f < 150 ? `brightness(${depthDim(HERO, f)})` : undefined,
+          filter:
+            !showBack && f < 150
+              ? `brightness(${depthDim(HERO, f)})`
+              : soften > 0
+                ? `blur(${8 * soften}px)`
+                : undefined,
         }}
       >
         <Shadow strength={showBack ? 1 + lift * 0.5 : 0.8 + lift * 0.7} />

@@ -48,7 +48,7 @@ export const IDentalBilling: React.FC = () => {
         <KineticText
           text={"One team runs the\nfull revenue cycle."}
           start={168}
-          exit={252}
+          exit={246}
           x={140}
           y={372}
           size={88}
@@ -56,8 +56,8 @@ export const IDentalBilling: React.FC = () => {
         />
         <KineticText
           text="Nothing gets lost between handoffs."
-          start={184}
-          exit={254}
+          start={178}
+          exit={248}
           x={140}
           y={600}
           size={38}

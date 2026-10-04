@@ -82,8 +82,9 @@ export const pileShake = (f: number) => {
 
 export const RING_C = { x: 1330, y: 470 };
 export const RING_R = 300;
+// The ring turns, then settles with its gap level at the top just as it unrolls.
 export const ringRot = (f: number) =>
-  interpolate(f, [176, 262], [-24, 12], clamp);
+  interpolate(f, [176, 248], [-24, 0], { ...clamp, easing: Easing.out(Easing.cubic) });
 
 export const FLIP_START = 148;
 export const FLIP_END = 172;
@@ -96,14 +97,14 @@ export const FLIP_END = 172;
 export const HERO_TO_RIDE: [number, number] = [250, 274];
 export const UNROLL: [number, number] = [248, 272];
 export const BAR_THIN: [number, number] = [250, 258];
-export const BAR_RISE: [number, number] = [254, 274];
+export const BAR_RISE: [number, number] = [248, 272];
 export const TO_AXIS: [number, number] = [450, 472];
 
 export const NODE_Y = 640;
 export const NODE_X = [220, 516, 812, 1108, 1404, 1700];
 export const TRACK_X0 = NODE_X[0];
 export const TRACK_X1 = NODE_X[NODE_X.length - 1];
-export const ARRIVE = [280, 300, 320, 340, 360, 380];
+export const ARRIVE = [280, 304, 328, 352, 376, 400];
 export const DWELL = 6;
 export const CARD_RIDE_Y = NODE_Y - 118;
 export const CARD_RIDE_SCALE = 0.58;
@@ -119,7 +120,7 @@ export const STAGES = [
 
 /** Camera pan that tracks the claim along the pipeline. */
 export const panX = (f: number) =>
-  interpolate(f, [282, 384, TO_AXIS[0], TO_AXIS[1]], [0, -36, -36, 0], {
+  interpolate(f, [282, 404, TO_AXIS[0], TO_AXIS[1]], [0, -36, -36, 0], {
     ...clamp,
     easing: EASE_IN_OUT,
   });
@@ -157,8 +158,8 @@ export const AXIS_BASE_Y = 625;
 export const axisY = (f: number) => AXIS_BASE_Y + statShift(f);
 
 export const NCR = 98.7;
-export const COUNT_START = 484;
-export const COUNT_END = 518;
+export const COUNT_START = 474;
+export const COUNT_END = 508;
 export const statValue = (f: number) =>
   AXIS_MIN + (NCR - AXIS_MIN) * p(f, COUNT_START, COUNT_END, EASE_SOFT);
 
