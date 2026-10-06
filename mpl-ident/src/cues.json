@@ -1,44 +1,146 @@
 {
   "_doc": "Global frame numbers (30fps) of every sync event. Shots MUST place these actions on exactly these frames; the audio is built from this file.",
   "shots": {
-    "S01_awaken":      [0, 66],
-    "S02_macro_grip":  [66, 126],
-    "S03_runup":       [126, 186],
-    "S04_delivery":    [186, 216],
-    "S05_strike":      [216, 276],
-    "S06_flight":      [276, 318],
-    "S07_catch":       [318, 378],
-    "S08_throw":       [378, 420],
-    "S09_runout":      [420, 465],
-    "S10_celebrate":   [465, 510],
-    "S11_montage":     [510, 570],
-    "S12_convergence": [570, 630],
-    "S13_logo_form":   [630, 690],
-    "S14_logo_play":   [690, 735],
-    "S15_hero":        [735, 810]
+    "S01_awaken": [
+      0,
+      66
+    ],
+    "S02_macro_grip": [
+      66,
+      126
+    ],
+    "S03_runup": [
+      126,
+      186
+    ],
+    "S04_delivery": [
+      186,
+      216
+    ],
+    "S05_strike": [
+      216,
+      276
+    ],
+    "S06_flight": [
+      276,
+      318
+    ],
+    "S07_catch": [
+      318,
+      378
+    ],
+    "S08_throw": [
+      378,
+      420
+    ],
+    "S09_runout": [
+      420,
+      465
+    ],
+    "S10_celebrate": [
+      465,
+      510
+    ],
+    "S11_montage": [
+      510,
+      570
+    ],
+    "S12_convergence": [
+      570,
+      630
+    ],
+    "S13_logo_form": [
+      630,
+      690
+    ],
+    "S14_logo_play": [
+      690,
+      735
+    ],
+    "S15_hero": [
+      735,
+      810
+    ]
   },
   "events": {
-    "flood_on": [10, 18, 25, 31, 36, 40, 44, 47],
+    "flood_on": [
+      10,
+      18,
+      25,
+      31,
+      36,
+      40,
+      44,
+      47
+    ],
     "led_sweep": 46,
-    "ball_handle": [72, 92, 110],
-    "breath": [78, 104],
-    "footsteps": [132, 141, 150, 158, 166, 173, 179, 184],
+    "ball_handle": [
+      72,
+      92,
+      110
+    ],
+    "breath": [
+      78,
+      104
+    ],
+    "footsteps": [
+      132,
+      141,
+      150,
+      158,
+      166,
+      173,
+      179,
+      184
+    ],
     "front_foot_land": 192,
     "ball_release": 196,
     "bat_contact": 240,
     "crowd_rise": 278,
-    "fielder_steps": [320, 326, 332, 337],
+    "fielder_steps": [
+      320,
+      326,
+      332,
+      337
+    ],
     "dive_launch": 340,
     "catch": 350,
-    "slide": [352, 372],
+    "slide": [
+      352,
+      372
+    ],
     "collect": 384,
     "throw_release": 392,
-    "batsman_steps": [400, 406, 412],
+    "batsman_steps": [
+      400,
+      406,
+      412
+    ],
     "stump_hit": 438,
     "fist_pump": 474,
-    "montage_hits": [512, 519, 526, 533, 540, 547, 554, 561],
-    "vortex": [570, 630],
-    "logo_locks": [646, 656, 664, 672, 680],
+    "montage_hits": [
+      511,
+      517,
+      523,
+      529,
+      535,
+      541,
+      547,
+      553,
+      559,
+      565
+    ],
+    "vortex": [
+      570,
+      630
+    ],
+    "logo_locks": [
+      646,
+      656,
+      664,
+      672,
+      680
+    ],
     "logo_bat_hit": 700,
     "ball_through_p": 708,
     "logo_wicket_hit": 716,
@@ -46,9 +148,21 @@
     "title_in": 752
   },
   "slowmo": {
-    "release": [192, 204],
-    "contact": [236, 248],
-    "catch": [344, 358],
-    "stumps": [434, 456]
+    "release": [
+      192,
+      204
+    ],
+    "contact": [
+      236,
+      248
+    ],
+    "catch": [
+      344,
+      358
+    ],
+    "stumps": [
+      434,
+      456
+    ]
   }
 }
