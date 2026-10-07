@@ -8,6 +8,9 @@
  *        toe toward -Y, face normal +Z (face plane at z = BAT_DIMS.faceZ), back/spine toward -Z.
  *        BAT_SWEET_SPOT is on the face 0.15 m above the toe.
  * Wicket local frame: origin on the ground under the middle stump; stumps along X; see wicketPhysics.ts.
+ *        Stump tops are domed with a bail groove along X (STUMP_GROOVE); resting bails lie in the grooves
+ *        (spigot axis at BAIL_REST_Y, barrel ~1.07 cm proud of the tops). The pitch shader leaves a hole
+ *        round each stump of the standard wickets at z = +-PITCH.stumpsZ.
  */
 import React, { useMemo } from "react";
 import { useThree } from "@react-three/fiber";
@@ -15,7 +18,8 @@ import * as THREE from "three";
 import { PAL } from "../theme";
 import { BALL, BAT, STUMPS } from "./dims";
 import { GLSL_NOISE } from "./Field";
-import { BAIL, BAIL_REST_X, BAIL_REST_Y, STUMP_X, WICKET_REST, type WicketState } from "./wicketPhysics";
+import { withStadiumRim } from "./Lights";
+import { BAIL, BAIL_REST_X, BAIL_REST_Y, STUMP_GROOVE, STUMP_X, WICKET_REST, type WicketState } from "./wicketPhysics";
 import type { Vec3 } from "../rig/types";
 
 const lin = (hex: string) => new THREE.Color(hex);
@@ -127,10 +131,8 @@ export const BALL_REST_Y = R + BALL_SEAM_HEIGHT;
 /** Height field of the ball surface (metres) and thread mask. p in local space. */
 const GLSL_BALL = /* glsl */ `
 uniform float uWear;
+uniform mat3 normalMatrix; // object -> view for normals (three sets it per object)
 varying vec3 vBP;
-varying vec3 vNmX;
-varying vec3 vNmY;
-varying vec3 vNmZ;
 ${GLSL_NOISE}
 const float BR = ${R.toFixed(5)};
 const float NST = 82.0;                 // stitches per row
@@ -191,18 +193,12 @@ float mplBallH(vec3 p, float detail, out float thread, out float band) {
 
 const BALL_VERT_PARS = /* glsl */ `
 varying vec3 vBP;
-varying vec3 vNmX;
-varying vec3 vNmY;
-varying vec3 vNmZ;
 const float BRv = ${R.toFixed(5)};
 `;
 
 const BALL_VERT = /* glsl */ `
 #include <begin_vertex>
 vBP = position;
-vNmX = normalMatrix * vec3(1.0, 0.0, 0.0);
-vNmY = normalMatrix * vec3(0.0, 1.0, 0.0);
-vNmZ = normalMatrix * vec3(0.0, 0.0, 1.0);
 {
   vec3 dn = normalize(position);
   float sv = abs(BRv * asin(clamp(dn.y, -1.0, 1.0)));
@@ -279,7 +275,7 @@ const makeBallMaterial = (env: THREE.Texture, wearU: { value: number }) => {
       .replace(
         "#include <normal_fragment_maps>",
         `#include <normal_fragment_maps>
-        normal = normalize(nObj.x * vNmX + nObj.y * vNmY + nObj.z * vNmZ);`,
+        normal = normalize(normalMatrix * nObj) * faceDirection;`,
       )
       .replace(
         "#include <clearcoat_normal_fragment_maps>",
@@ -293,7 +289,7 @@ const makeBallMaterial = (env: THREE.Texture, wearU: { value: number }) => {
       );
   };
   m.customProgramCacheKey = () => "mpl-ball-v6";
-  return m;
+  return withStadiumRim(m, 0.07, 6.0);
 };
 
 /** Sphere with latitude rows concentrated at the equator where the seam needs them. */
@@ -318,7 +314,8 @@ const ballGeometry = (lon: number, lat: number) => {
     for (let i = 0; i < lon; i++) {
       const a = j * (lon + 1) + i;
       const b = a + lon + 1;
-      idx.push(a, a + 1, b, a + 1, b + 1, b);
+      // counter-clockwise seen from outside (front faces out)
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
     }
   }
   const g = new THREE.BufferGeometry();
@@ -730,7 +727,7 @@ const makeBladeMaterial = (env: THREE.Texture, livery: { value: number }) => {
       );
   };
   m.customProgramCacheKey = () => "mpl-blade-v5";
-  return m;
+  return withStadiumRim(m, 0.2, 5.0);
 };
 
 const HANDLE_FRAG = /* glsl */ `
@@ -789,7 +786,7 @@ const makeHandleMaterial = (env: THREE.Texture) => {
       );
   };
   m.customProgramCacheKey = () => "mpl-handle-v1";
-  return m;
+  return withStadiumRim(m, 0.45, 4.0);
 };
 
 let bladeGeoSingleton: THREE.BufferGeometry | null = null;
@@ -835,25 +832,40 @@ const STUMP_PARS = /* glsl */ `
 varying vec3 vSP;
 ${GLSL_NOISE}
 `;
+const H_ = STUMPS.height;
 const STUMP_FRAG = /* glsl */ `
 #include <color_fragment>
 float sy = vSP.y;
-float band = (1.0 - smoothstep(0.0, 0.0012, abs(sy - ${(STUMPS.height - 0.078).toFixed(4)}) - 0.009));
+float sAng = atan(vSP.z, vSP.x);
 vec3 white = vec3(${lin(PAL.white).toArray().map((v) => v.toFixed(4)).join(",")});
 vec3 tealC = vec3(${lin(PAL.teal).toArray().map((v) => v.toFixed(4)).join(",")});
-vec3 sc = mix(white, tealC, band);
-// grass/soil grime near the base, faint scuffs from the ball
+// gloss paint over ash: the faintest lengthwise grain shows through
+float grain = mplNoise2(vec2(sAng * 9.0, sy * 2.5)) * 0.6 + mplNoise2(vec2(sAng * 40.0, sy * 7.0)) * 0.4;
+vec3 sc = white * (0.965 + 0.045 * grain);
+// soft ball scuffs at ball height (greyish, a hint of leather red)
+float scuffZone = smoothstep(0.08, 0.16, sy) * (1.0 - smoothstep(0.48, 0.58, sy));
+float scuff = smoothstep(0.74, 0.88, mplNoise2(vec2(sAng * 5.0 + 3.0, sy * 26.0))) * scuffZone;
+sc = mix(sc, sc * vec3(0.84, 0.76, 0.75), scuff * 0.45);
+// a thin, crisply painted teal band 7.5 cm below the top
+float sfw = fwidth(sy) * 0.75 + 0.00015;
+float band = smoothstep(-sfw, sfw, 0.0055 - abs(sy - ${(H_ - 0.075).toFixed(4)}));
+sc = mix(sc, tealC, band);
+// bail grooves: the paint is worn through to the wood where the spigots sit
+float inGroove = (1.0 - smoothstep(0.0034, 0.0052, abs(vSP.z))) * smoothstep(${(H_ - 0.0068).toFixed(4)}, ${(H_ - 0.0048).toFixed(4)}, sy);
+sc = mix(sc, vec3(${lin(PAL.willow).toArray().map((v) => v.toFixed(4)).join(",")}) * 0.8, inGroove * 0.85);
+// grass/soil grime near the base
 float grime = 1.0 - smoothstep(0.0, 0.09, sy);
-sc = mix(sc, sc * vec3(0.55, 0.6, 0.45), grime * (0.6 + 0.4 * mplNoise2(vec2(atan(vSP.z, vSP.x) * 4.0, sy * 60.0))));
-sc *= 0.96 + 0.04 * mplNoise2(vec2(atan(vSP.z, vSP.x) * 6.0, sy * 120.0));
+sc = mix(sc, sc * vec3(0.55, 0.6, 0.45), grime * (0.6 + 0.4 * mplNoise2(vec2(sAng * 4.0, sy * 60.0))));
 diffuseColor.rgb = sc;
+float sRough = mix(0.3 + 0.08 * grain, 0.5, max(scuff * 0.6, inGroove));
+float sCoat = (1.0 - inGroove) * (1.0 - band * 0.3);
 `;
 const makeStumpMaterial = (env: THREE.Texture) => {
   const m = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.42,
-    clearcoat: 0.35,
-    clearcoatRoughness: 0.25,
+    roughness: 0.32,
+    clearcoat: 0.45,
+    clearcoatRoughness: 0.16,
     envMap: env,
     envMapIntensity: 0.3,
     specularIntensity: 0.6,
@@ -864,28 +876,44 @@ const makeStumpMaterial = (env: THREE.Texture) => {
       .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSP = position;");
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", "#include <common>\n" + STUMP_PARS)
-      .replace("#include <color_fragment>", STUMP_FRAG);
+      .replace("#include <color_fragment>", STUMP_FRAG)
+      .replace("#include <roughnessmap_fragment>", "float roughnessFactor = sRough;")
+      .replace("#include <lights_physical_fragment>", "#include <lights_physical_fragment>\nmaterial.clearcoat *= sCoat;");
   };
-  m.customProgramCacheKey = () => "mpl-stump-v2";
-  return m;
+  m.customProgramCacheKey = () => "mpl-stump-v3";
+  return withStadiumRim(m, 0.1, 6.0);
 };
 
 const BAIL_FRAG = /* glsl */ `
 #include <color_fragment>
-// thin teal ring round the middle of the barrel (bail axis is local X)
-float ring = 1.0 - smoothstep(0.0028, 0.0036, abs(vSP.x));
+// bail axis is local X (barrel centre at 0)
+float bx = vSP.x;
+float bAng = atan(vSP.z, vSP.y);
+float bfw = fwidth(bx) * 0.75 + 0.00008;
 vec3 white = vec3(${lin(PAL.white).toArray().map((v) => v.toFixed(4)).join(",")});
 vec3 tealC = vec3(${lin(PAL.teal).toArray().map((v) => v.toFixed(4)).join(",")});
-diffuseColor.rgb = mix(white, tealC, ring);
+// lacquered paint over turned ash: faint lengthwise grain and fine turning rings (while resolvable)
+float grain = mplNoise2(vec2(bAng * 5.0, bx * 160.0)) * 0.6 + mplNoise2(vec2(bAng * 22.0, bx * 420.0)) * 0.4;
+float turnF = 1.0 - smoothstep(0.00012, 0.0004, bfw);
+float turn = (0.5 + 0.5 * sin(bx * 17000.0 + mplNoise2(vec2(bx * 300.0, 1.0)) * 3.0)) * turnF;
+vec3 bc = white * (0.965 + 0.04 * grain - 0.015 * turn);
+// thin teal ring round the middle of the barrel
+float ring = smoothstep(-bfw, bfw, 0.0023 - abs(bx));
+bc = mix(bc, tealC, ring);
+// the undersides of the spigots, where they lie in the stump grooves, are worn to the wood
+float tipWear = smoothstep(0.0385, 0.0415, abs(bx)) * smoothstep(0.0005, -0.0025, vSP.y);
+bc = mix(bc, vec3(${lin(PAL.willow).toArray().map((v) => v.toFixed(4)).join(",")}) * 0.85, tipWear * 0.35);
+diffuseColor.rgb = bc;
+float bRoughB = 0.28 + 0.06 * grain + 0.1 * tipWear;
 `;
 const makeBailMaterial = (env: THREE.Texture) => {
   const m = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.4,
-    clearcoat: 0.35,
-    clearcoatRoughness: 0.25,
+    roughness: 0.3,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.12,
     envMap: env,
-    envMapIntensity: 0.3,
+    envMapIntensity: 0.35,
     specularIntensity: 0.6,
   });
   m.onBeforeCompile = (shader) => {
@@ -893,57 +921,162 @@ const makeBailMaterial = (env: THREE.Texture) => {
       .replace("#include <common>", "#include <common>\nvarying vec3 vSP;")
       .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSP = position;");
     shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vSP;")
-      .replace("#include <color_fragment>", BAIL_FRAG);
+      .replace("#include <common>", "#include <common>\n" + STUMP_PARS)
+      .replace("#include <color_fragment>", BAIL_FRAG)
+      .replace("#include <roughnessmap_fragment>", "float roughnessFactor = bRoughB;");
   };
-  m.customProgramCacheKey = () => "mpl-bail-v1";
-  return m;
+  m.customProgramCacheKey = () => "mpl-bail-v2";
+  return withStadiumRim(m, 0.1, 6.0);
 };
 
+/**
+ * Stump top (Law 8: domed except for the bail grooves): a shallow dome with a round-bottomed groove
+ * running along X (the line of the wicket) that the bail spigots sit in. Height in stump-local metres.
+ */
+const stumpTopY = (x: number, z: number) => {
+  const R = STUMPS.radius;
+  const r2 = Math.min(1, (x * x + z * z) / (R * R));
+  const dome = STUMPS.height - 0.0035 * r2;
+  const g = STUMP_GROOVE;
+  const az = Math.abs(z);
+  const groove = az < g.radius ? STUMPS.height - g.depth + g.radius - Math.sqrt(g.radius * g.radius - az * az) : 1;
+  // smooth minimum: the groove's lips are softened like a cut edge that has been painted over
+  const k = 0.0007;
+  const hh = Math.max(k - Math.abs(dome - groove), 0) / k;
+  return Math.min(dome, groove) - hh * hh * k * 0.25;
+};
+
+/**
+ * One stump: grooved dome on a cylinder, its base 6 cm in the ground. The top cap is a square grid
+ * mapped onto the disc, so its rows run straight along the groove (crisp lips at any size); the
+ * rounded rim and the side share the cap's boundary vertices (smooth normals, no seam).
+ */
 const buildStumpGeometry = () => {
-  const r = STUMPS.radius;
-  const h = STUMPS.height;
-  const pts: THREE.Vector2[] = [];
-  pts.push(new THREE.Vector2(0.0001, -0.06));
-  pts.push(new THREE.Vector2(r, -0.06));
-  pts.push(new THREE.Vector2(r, h - 0.006));
-  // domed top
-  for (let i = 1; i <= 6; i++) {
-    const a = (i / 6) * (Math.PI / 2);
-    pts.push(new THREE.Vector2(0.0001 + (r - 0.0001) * Math.cos(a) * (1 - 0.15 * (i / 6)), h - 0.006 + 0.006 * Math.sin(a)));
+  const R = STUMPS.radius;
+  const e = 0.0013; // edge round-over
+  const Rt = R - e;
+  const N = 36;
+  const pos: number[] = [];
+  const gi = (i: number, j: number) => j * (N + 1) + i;
+  for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= N; i++) {
+      const u = -1 + (2 * i) / N;
+      const v = -1 + (2 * j) / N;
+      const x = Rt * u * Math.sqrt(1 - (v * v) / 2);
+      const z = Rt * v * Math.sqrt(1 - (u * u) / 2);
+      pos.push(x, stumpTopY(x, z), z);
+    }
   }
-  const g = new THREE.LatheGeometry(pts, 32);
+  const idx: number[] = [];
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) idx.push(gi(i, j), gi(i, j + 1), gi(i + 1, j), gi(i + 1, j), gi(i, j + 1), gi(i + 1, j + 1));
+  }
+  // boundary loop of the cap, by increasing angle
+  const loop: number[] = [];
+  for (let i = 0; i < N; i++) loop.push(gi(i, 0));
+  for (let j = 0; j < N; j++) loop.push(gi(N, j));
+  for (let i = N; i > 0; i--) loop.push(gi(i, N));
+  for (let j = N; j > 0; j--) loop.push(gi(0, j));
+  const P = loop.length;
+  const ang = loop.map((k) => Math.atan2(pos[k * 3 + 2], pos[k * 3]));
+  const rimY = loop.map((k) => pos[k * 3 + 1]);
+  // rows outside the cap: round-over, then the side down into the ground
+  const rows: ((k: number) => [number, number])[] = [];
+  for (let s2 = 1; s2 <= 4; s2++) {
+    const a = (s2 / 4) * (Math.PI / 2);
+    rows.push((k) => [Rt + e * Math.sin(a), rimY[k] - e * (1 - Math.cos(a))]);
+  }
+  rows.push((k) => [R, rimY[k] - e - 0.004]);
+  rows.push(() => [R, 0.25]);
+  rows.push(() => [R, 0.0]);
+  rows.push(() => [R, -0.06]);
+  let prev = loop;
+  rows.forEach((row) => {
+    const cur: number[] = [];
+    for (let k = 0; k < P; k++) {
+      const [r, y] = row(k);
+      cur.push(pos.length / 3);
+      pos.push(r * Math.cos(ang[k]), y, r * Math.sin(ang[k]));
+    }
+    for (let k = 0; k < P; k++) {
+      const k1 = (k + 1) % P;
+      idx.push(prev[k], prev[k1], cur[k], prev[k1], cur[k1], cur[k]);
+    }
+    prev = cur;
+  });
+  const bottom = pos.length / 3;
+  pos.push(0, -0.06, 0);
+  for (let k = 0; k < P; k++) idx.push(bottom, prev[k], prev[(k + 1) % P]);
+  // orient every triangle outward (up on the cap, radially on the rim and side, down at the base)
+  const vtx = (n: number) => new THREE.Vector3(pos[n * 3], pos[n * 3 + 1], pos[n * 3 + 2]);
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = vtx(idx[t]);
+    const b = vtx(idx[t + 1]);
+    const c = vtx(idx[t + 2]);
+    const n = b.clone().sub(a).cross(c.clone().sub(a));
+    const cen = a.add(b).add(c).divideScalar(3);
+    const rc = Math.hypot(cen.x, cen.z);
+    const out =
+      cen.y < -0.059 ? new THREE.Vector3(0, -1, 0) : rc < Rt - 1e-4 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(cen.x, cen.y > 0.5 ? 0.01 : 0, cen.z);
+    if (n.dot(out) < 0) [idx[t + 1], idx[t + 2]] = [idx[t + 2], idx[t + 1]];
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
   g.computeVertexNormals();
+  g.computeBoundingSphere();
   return g;
 };
 
-/** Bail along local X, barrel centre at origin, long spigot toward -X. */
+/**
+ * Bail along local X, barrel centre at origin, long spigot toward -X. A turned profile: rounded
+ * spigot ends, filleted shoulders, a beaded barrel with a slight swell (reads at frame-filling size).
+ */
 const buildBailGeometry = () => {
   const { longSpigot: ls, barrel: br, shortSpigot: ss, spigotRadius: sr, barrelRadius: rr } = BAIL;
   const yL = -br / 2 - ls; // long spigot end
   const yS = br / 2 + ss; // short spigot end
   const pts: THREE.Vector2[] = [];
   const add = (r: number, y: number) => pts.push(new THREE.Vector2(r, y));
-  // rounded long spigot end
-  for (let i = 0; i <= 4; i++) {
-    const a = (i / 4) * (Math.PI / 2);
-    add(0.0001 + sr * Math.sin(a), yL + sr * (1 - Math.cos(a)));
+  const NE = 8;
+  // rounded long spigot end (slightly flattened dome)
+  for (let i = 0; i <= NE; i++) {
+    const a = (i / NE) * (Math.PI / 2);
+    add(0.00005 + sr * 0.96 * Math.sin(a), yL + sr * 0.8 * (1 - Math.cos(a)));
   }
-  add(sr, -br / 2 - 0.006);
-  // collar into the barrel
-  add(sr * 1.15, -br / 2 - 0.002);
-  add(rr * 0.92, -br / 2);
-  add(rr, -br / 2 + 0.004);
-  add(rr * 1.06, 0);
-  add(rr, br / 2 - 0.004);
-  add(rr * 0.92, br / 2);
-  add(sr * 1.15, br / 2 + 0.002);
-  add(sr, br / 2 + 0.006);
-  for (let i = 0; i <= 4; i++) {
-    const a = (i / 4) * (Math.PI / 2);
-    add(0.0001 + sr * Math.cos(a), yS - sr + sr * Math.sin(a));
+  add(sr, yL + sr * 1.2);
+  add(sr * 0.985, -br / 2 - 0.009);
+  // half barrel profile from its end (u = 0) to its centre (u = br/2); mirrored for the other half
+  const half: [number, number][] = [];
+  // fillet out of the spigot into the barrel's end face
+  for (let i = 0; i <= 5; i++) {
+    const a = (i / 5) * (Math.PI / 2);
+    half.push([sr + (rr * 0.78 - sr) * (1 - Math.cos(a)), -0.006 + 0.006 * Math.sin(a)]);
   }
-  const g = new THREE.LatheGeometry(pts, 20);
+  half.push([rr * 0.9, 0.0012]);
+  half.push([rr * 0.98, 0.003]);
+  // bead
+  half.push([rr * 1.02, 0.0045]);
+  half.push([rr * 1.02, 0.0058]);
+  half.push([rr * 0.985, 0.0068]);
+  // turned V-groove
+  half.push([rr * 0.93, 0.0079]);
+  half.push([rr * 0.985, 0.009]);
+  // swelling body
+  for (let i = 0; i <= 6; i++) {
+    const u = 0.0105 + ((br / 2 - 0.0105) * i) / 6;
+    const k = (u - 0.0105) / (br / 2 - 0.0105);
+    half.push([rr * (1.0 + 0.055 * Math.sin((k * Math.PI) / 2)), u]);
+  }
+  half.forEach(([r, u]) => add(r, -br / 2 + u));
+  for (let i = half.length - 2; i >= 0; i--) add(half[i][0], br / 2 - half[i][1]);
+  add(sr * 0.985, br / 2 + 0.009);
+  add(sr, yS - sr * 1.2);
+  for (let i = NE; i >= 0; i--) {
+    const a = (i / NE) * (Math.PI / 2);
+    add(0.00005 + sr * 0.96 * Math.sin(a), yS - sr * 0.8 * (1 - Math.cos(a)));
+  }
+  const g = new THREE.LatheGeometry(pts, 72);
   g.rotateZ(-Math.PI / 2); // lathe Y axis -> +X ... long spigot (-y) -> -X
   g.computeVertexNormals();
   return g;

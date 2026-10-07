@@ -3,9 +3,22 @@
  * with the glow of lit haze over the bowl, drifting haze cards lit by the floodlight beams, and
  * dust motes that are only visible inside the beams.
  *
- *   <Atmosphere F floods haze fogDensity motes motesCenter motesRadius sky />
+ *   <Atmosphere F floods haze fogDensity motes motesCenter motesRadius motesHeight sky />
+ *   FOG_DENSITY, fogColorFor(master), fogDensityScale(cameraPos)
  *
- * Pure function of F and props. Sets `scene.fog` during render (Remotion advances R3F in an effect).
+ * Dust motes live in a box that follows the camera by default (world-anchored, wrapped), so every
+ * shot gets motes around the lens without placing them; pass motesCenter to pin the box instead.
+ * Haze and motes use the forward-scattering phase function from Lights.tsx: they glow when the
+ * camera looks toward a lit bank and stay faint when it looks away.
+ *
+ * The fog is densest in the lit bowl: its density is scaled by the camera's distance from the
+ * bowl (fogDensityScale: x1 inside ~150m, x0.4 by ~330m), so the S01 aerial start and the S15
+ * pull-back stay crisp. The scale is applied from the camera that actually draws (an invisible
+ * first-drawn mesh), and the sky reads the built-in cameraPosition, so neither depends on where
+ * <CameraRig/> sits in the shot's tree.
+ *
+ * Pure function of F, the camera and props. Sets `scene.fog` during render (Remotion advances R3F
+ * in an effect).
  */
 import React, { useEffect, useMemo } from "react";
 import { useThree } from "@react-three/fiber";
@@ -20,6 +33,17 @@ const FOG_DARK = new THREE.Color("#05080a");
 const FOG_LIT = new THREE.Color("#152025");
 /** Default FogExp2 density. ~7% veil at 100m, ~25% at 200m. */
 export const FOG_DENSITY = 0.0026;
+
+/**
+ * The haze is densest in the lit bowl; the air above and outside it is clearer. The scene fog
+ * density is scaled by the camera's distance from the bowl: x1 within ~150m of (0, 25, 0), easing
+ * to x0.4 by ~330m (the S01 aerial start, the S15 pull-back), so exteriors stay crisp.
+ */
+export const fogDensityScale = (cam: THREE.Vector3) => {
+  const d = Math.hypot(cam.x, cam.y - 25, cam.z);
+  const t = Math.max(0, Math.min(1, (d - 150) / 180));
+  return 1 - 0.6 * t * t * (3 - 2 * t);
+};
 
 /** Fog colour for a given overall flood power (0..1). */
 export const fogColorFor = (master: number) => FOG_DARK.clone().lerp(FOG_LIT, Math.max(0, Math.min(1, master)));
@@ -70,7 +94,6 @@ void main() {
 
 const SKY_FRAG = /* glsl */ `
 uniform float uLit;
-uniform vec3 uCamPos;
 uniform vec3 uTeal;
 uniform vec3 uWarm;
 varying vec3 vDir;
@@ -82,9 +105,9 @@ void main() {
   vec3 hor = vec3(0.006, 0.0085, 0.010) + uWarm * 0.002;
   vec3 col = mix(hor, zen, smoothstep(-0.05, 0.6, el));
   // lit haze dome above the bowl: strongest looking up from inside, a halo on the horizon from outside
-  float inside = 1.0 - smoothstep(60.0, 160.0, length(uCamPos.xz));
+  float inside = 1.0 - smoothstep(60.0, 160.0, length(cameraPosition.xz));
   float dome = mix(smoothstep(0.0, 0.25, el) * (1.0 - smoothstep(0.55, 1.0, el)) * 0.6 + smoothstep(0.3, 1.0, el) * 0.4, exp(-abs(el - 0.05) * 6.0), 1.0 - inside);
-  vec3 glow = mix(vec3(0.020, 0.028, 0.031), uTeal * 0.02, 0.25);
+  vec3 glow = mix(vec3(0.011, 0.015, 0.017), uTeal * 0.011, 0.25);
   col += glow * dome * uLit;
   // very fine dither so the gradient never bands
   col += (hash21(gl_FragCoord.xy) - 0.5) * 0.0015;
@@ -94,7 +117,6 @@ void main() {
 `;
 
 const Sky: React.FC<{ lit: number }> = ({ lit }) => {
-  const camera = useThree((s) => s.camera);
   const { geo, mat } = useMemo(() => {
     const g = new THREE.SphereGeometry(900, 48, 24);
     const m = new THREE.ShaderMaterial({
@@ -104,7 +126,6 @@ const Sky: React.FC<{ lit: number }> = ({ lit }) => {
       depthWrite: false,
       uniforms: {
         uLit: { value: 0 },
-        uCamPos: { value: new THREE.Vector3() },
         uTeal: { value: v3(PAL.teal) },
         uWarm: { value: v3(PAL.warm) },
       },
@@ -112,7 +133,6 @@ const Sky: React.FC<{ lit: number }> = ({ lit }) => {
     return { geo: g, mat: m };
   }, []);
   mat.uniforms.uLit.value = lit;
-  mat.uniforms.uCamPos.value.copy(camera.position);
   return <mesh geometry={geo} material={mat} frustumCulled={false} renderOrder={-100} />;
 };
 
@@ -140,7 +160,7 @@ void main() {
   vec3 wp = c + (camR * position.x + camU * position.y) * iCard.w;
   vUv = position.xy;
   vSeed = iSeed;
-  vBeam = beamField(wp);
+  vBeam = beamFieldSeen(wp, normalize(cameraPosition - wp));
   vY = wp.y;
   float dc = length(cameraPosition - c);
   vFade = smoothstep(iCard.w * 0.25, iCard.w * 0.8, dc);
@@ -166,6 +186,7 @@ varying float vFogDepth;
 varying float vY;
 void main() {
   float r = length(vUv) * 2.0;
+  if (r >= 1.0 || vFade <= 0.0) discard;
   float soft = 1.0 - smoothstep(0.2, 1.0, r);
   soft *= soft;
   vec3 nc = vec3(vUv * 1.6 + vSeed * 7.0, uTime * 0.02 + vSeed.x);
@@ -188,14 +209,14 @@ const HazeCards: React.FC<{ t: number; floods: number[]; lit: number; gain: numb
 }) => {
   const { geo, mat } = useMemo(() => {
     const r = rng(8080);
-    const N = 22;
+    const N = 14;
     const card = new Float32Array(N * 4);
     const seed = new Float32Array(N * 2);
     for (let i = 0; i < N; i++) {
       const a = r() * Math.PI * 2;
       const rad = Math.sqrt(r()) * 80;
       const y = 10 + r() * 34;
-      card.set([Math.cos(a) * rad, y, Math.sin(a) * rad, 45 + r() * 55], i * 4);
+      card.set([Math.cos(a) * rad, y, Math.sin(a) * rad, 55 + r() * 55], i * 4);
       seed.set([r(), r()], i * 2);
     }
     const quad = new THREE.PlaneGeometry(1, 1, 7, 7);
@@ -228,7 +249,7 @@ const HazeCards: React.FC<{ t: number; floods: number[]; lit: number; gain: numb
   setFloodUniform(mat.uniforms.uFlood, floods);
   mat.uniforms.uTime.value = t;
   mat.uniforms.uLit.value = lit;
-  mat.uniforms.uGain.value = 0.022 * gain;
+  mat.uniforms.uGain.value = 0.03 * gain;
   return <mesh geometry={geo} material={mat} frustumCulled={false} renderOrder={6} />;
 };
 
@@ -242,35 +263,61 @@ ${BEAM_GLSL}
 attribute vec4 aSeed;
 uniform float uTime;
 uniform vec3 uCenter;
+uniform float uFollow;
 uniform float uRadius;
 uniform float uHeight;
 uniform float uViewH;
 uniform float uAmount;
+uniform float uGain;
 varying float vI;
 varying float vFogDepth;
+
+// Light a dust mote receives from the beams, seen from the camera. Dust grains scatter strongly
+// forward (HG g = 0.7): backlit motes sparkle, side-lit ones are faint. No ground fade here.
+float moteLight(vec3 p, vec3 toCam) {
+  float sum = 0.0;
+  for (int i = 0; i < 8; i++) {
+    if (uFlood[i] <= 0.001) continue;
+    vec3 d = p - uBeamApex[i];
+    vec3 q = vec3(dot(d, uBeamR[i]), dot(d, uBeamU[i]), dot(d, uBeamA[i]));
+    float dens = beamLocalDensity(q);
+    if (dens <= 0.0) continue;
+    float c = dot(d, toCam) / max(length(d), 1e-3);
+    float hg = 0.51 / pow(1.49 - 1.4 * c, 1.5);
+    sum += uFlood[i] * dens * (0.15 + hg);
+  }
+  return sum;
+}
+
 void main() {
   float t = uTime;
-  // deterministic drift: slow wind + gentle curls + a faint rise, wrapped inside the volume
-  vec3 base = position * vec3(uRadius * 2.0, uHeight, uRadius * 2.0);
+  // deterministic drift: slow wind + gentle curls + a faint rise, wrapped inside a box that is
+  // either fixed (uCenter) or follows the camera (world-anchored, so parallax stays correct)
+  vec3 size = vec3(uRadius * 2.0, uHeight, uRadius * 2.0);
+  vec3 base = position * size;
   vec3 drift = vec3(t * 0.35, t * 0.04, t * 0.12)
     + vec3(sin(t * (0.3 + aSeed.x * 0.5) + aSeed.y * 6.28), sin(t * (0.25 + aSeed.y * 0.4) + aSeed.z * 6.28) * 0.6, cos(t * (0.28 + aSeed.z * 0.45) + aSeed.x * 6.28)) * (0.4 + aSeed.w * 0.8);
-  vec3 rel = base + drift;
-  vec3 size = vec3(uRadius * 2.0, uHeight, uRadius * 2.0);
+  vec3 c = mix(uCenter, cameraPosition, uFollow);
+  vec3 rel = base + drift - c;
   rel = mod(rel + size * 0.5, size) - size * 0.5;
-  vec3 wp = uCenter + rel;
-  float b = beamField(wp);
+  vec3 wp = c + rel;
+  vec3 toCam = normalize(cameraPosition - wp);
+  float b = moteLight(wp, toCam);
   float tw = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(t * (1.5 + aSeed.w * 3.0) + aSeed.x * 40.0), 3.0);
   float on = step(aSeed.w, uAmount);
+  // fade out at the box faces so wrapping never pops
+  vec3 e = abs(rel) / (size * 0.5);
+  float edge = (1.0 - smoothstep(0.8, 1.0, max(max(e.x, e.y), e.z))) * smoothstep(0.02, 0.2, wp.y);
   vec4 mv = viewMatrix * vec4(wp, 1.0);
   vFogDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
   float pxPerM = projectionMatrix[1][1] * uViewH * 0.5;
-  float px = (0.005 + aSeed.z * 0.01) * pxPerM / max(-mv.z, 0.05);
-  float ps = clamp(px, 1.0, 14.0);
+  float px = (0.004 + aSeed.z * 0.008) * pxPerM / max(-mv.z, 0.05);
+  float ps = clamp(px, 1.0, 16.0);
   // energy conservation: sub-pixel motes get dimmer, big (out of focus) ones spread their light
   float area = (px * px) / (ps * ps);
-  vI = b * tw * on * min(area, 1.0);
-  vI *= px > 14.0 ? (14.0 * 14.0) / (px * px) : 1.0;
+  vI = min(b * uGain, 2.5) * tw * on * edge * min(area, 1.0);
+  vI *= px > 16.0 ? (16.0 * 16.0) / (px * px) : 1.0;
   gl_PointSize = vI > 0.0005 ? ps : 0.0;
 }
 `;
@@ -286,7 +333,7 @@ void main() {
   vec2 c = gl_PointCoord - 0.5;
   float r = length(c) * 2.0;
   float a = 1.0 - smoothstep(0.35, 1.0, r);
-  vec3 col = uCol * vI * a * uGain;
+  vec3 col = uCol * vI * a;
   col *= 1.0 - fogAmount(vFogDepth) * 0.6;
   gl_FragColor = vec4(col, 1.0);
   ${TONE}
@@ -299,7 +346,7 @@ const Motes: React.FC<{
   t: number;
   floods: number[];
   amount: number;
-  center: Vec3;
+  center: Vec3 | null;
   radius: number;
   height: number;
 }> = ({ t, floods, amount, center, radius, height }) => {
@@ -327,6 +374,7 @@ const Motes: React.FC<{
         ...makeBeamUniforms(),
         uTime: { value: 0 },
         uCenter: { value: new THREE.Vector3() },
+        uFollow: { value: 1 },
         uRadius: { value: 30 },
         uHeight: { value: 20 },
         uViewH: { value: 1080 },
@@ -341,12 +389,13 @@ const Motes: React.FC<{
   const u = mat.uniforms;
   setFloodUniform(u.uFlood, floods);
   u.uTime.value = t;
-  u.uCenter.value.set(center[0], center[1], center[2]);
+  if (center) u.uCenter.value.set(center[0], center[1], center[2]);
+  u.uFollow.value = center ? 0 : 1;
   u.uRadius.value = radius;
   u.uHeight.value = height;
   u.uViewH.value = viewH;
   u.uAmount.value = amount;
-  u.uGain.value = 2.2;
+  u.uGain.value = 5;
   return (
     <points geometry={geo} material={mat} frustumCulled={false} renderOrder={7} />
   );
@@ -367,11 +416,11 @@ export type AtmosphereProps = {
   fogDensity?: number;
   /** dust mote amount 0..1 (default 1) */
   motes?: number;
-  /** centre of the dust-mote volume (default [0, 9, 0]) */
+  /** centre of a fixed dust-mote volume; omit to keep the volume around the camera (default) */
   motesCenter?: Vec3;
-  /** half-width of the dust-mote volume in metres (default 32) */
+  /** half-width of the dust-mote volume in metres (default 12) */
   motesRadius?: number;
-  /** height of the dust-mote volume in metres (default 18) */
+  /** height of the dust-mote volume in metres (default 8) */
   motesHeight?: number;
   /** draw the night sky dome (default true) */
   sky?: boolean;
@@ -383,21 +432,33 @@ export const Atmosphere: React.FC<AtmosphereProps> = ({
   haze = 1,
   fogDensity = FOG_DENSITY,
   motes = 1,
-  motesCenter = [0, 9, 0],
-  motesRadius = 32,
-  motesHeight = 18,
+  motesCenter,
+  motesRadius = 12,
+  motesHeight = 8,
   sky = true,
 }) => {
   const scene = useThree((s) => s.scene);
   const fl = floods ?? stadiumStateAt(F).floods;
   const master = floodMaster(fl);
   const t = F / FPS;
-  const { fog, noise } = useMemo(
-    () => ({ fog: new THREE.FogExp2(FOG_DARK.getHex(), FOG_DENSITY), noise: getNoise3D() }),
-    [],
-  );
+  const { fog, noise, driver } = useMemo(() => {
+    const f = new THREE.FogExp2(FOG_DARK.getHex(), FOG_DENSITY);
+    // An invisible first-drawn mesh sets the fog density from the camera that actually renders
+    // (opaque, renderOrder -1000: its onBeforeRender runs before any other object is set up), so
+    // the result never depends on the order of components in the shot's tree.
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+    const m = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false });
+    const d = new THREE.Mesh(g, m);
+    d.frustumCulled = false;
+    d.renderOrder = -1000;
+    return { fog: f, noise: getNoise3D(), driver: d };
+  }, []);
   fog.color.copy(fogColorFor(master));
   fog.density = fogDensity;
+  driver.onBeforeRender = (_r, _s, cam) => {
+    fog.density = fogDensity * fogDensityScale(cam.position);
+  };
   const wantFog = fogDensity > 0 ? fog : null;
   if (scene.fog !== wantFog) scene.fog = wantFog;
   useEffect(
@@ -408,6 +469,7 @@ export const Atmosphere: React.FC<AtmosphereProps> = ({
   );
   return (
     <>
+      <primitive object={driver} />
       {sky ? <Sky lit={master} /> : null}
       {haze > 0 ? <HazeCards t={t} floods={fl} lit={master} gain={haze} noise={noise} /> : null}
       {motes > 0 ? (
@@ -415,7 +477,7 @@ export const Atmosphere: React.FC<AtmosphereProps> = ({
           t={t}
           floods={fl}
           amount={motes}
-          center={motesCenter}
+          center={motesCenter ?? null}
           radius={motesRadius}
           height={motesHeight}
         />

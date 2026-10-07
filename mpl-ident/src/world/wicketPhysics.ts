@@ -9,6 +9,12 @@
  *   const s = wicketHitState(t, { dir: [0, 0, -1], stump: 1, toward: [0.3, 0.2, -1] });
  *   <Wicket position={[0, 0, STRIKER_STUMPS_Z]} state={s} />
  *
+ * Hero bail into the lens (S09 -> S10 transition): give the wicket-local point just in front of
+ * the camera and the action time at which the bail must be there; the launch is solved exactly.
+ *   const T = actionTime(465, keys) - actionTime(438, keys);         // slow-motion seconds
+ *   const lens = camWorld - wicketWorld + 0.22 m toward the wicket; // wicket-local target
+ *   wicketHitState(t, { dir, stump: 1, heroTarget: lens, heroTime: T, heroSpin: 14 });
+ *
  * `t` is ACTION time in seconds since the ball touched the stumps (use actionTime()
  * for slow motion). For t <= 0 the wicket is intact.
  *
@@ -30,8 +36,16 @@ export const BAIL = {
   spigotRadius: 0.0047,
   barrelRadius: 0.0094,
 } as const;
-/** Height of a resting bail's axis (spigots sit in shallow grooves on the stump tops). */
-export const BAIL_REST_Y = STUMPS.height + BAIL.spigotRadius - 0.0012;
+/**
+ * The bail groove cut across each stump top (along X): round-bottomed, `radius` wide on each side of
+ * the centre line, its floor `depth` below the dome's apex (STUMPS.height). Props.tsx models it.
+ */
+export const STUMP_GROOVE = { depth: 0.004, radius: 0.0052 } as const;
+/**
+ * Height of a resting bail's axis: the spigots lie on the groove floors. The barrel then stands
+ * ~1.07 cm above the stump tops (Law 8 allows at most 1.27 cm).
+ */
+export const BAIL_REST_Y = STUMPS.height - STUMP_GROOVE.depth + BAIL.spigotRadius;
 /** x of each bail's barrel centre (between stumps 0-1 and 1-2). */
 export const BAIL_REST_X = [-STUMPS.spacing / 2, STUMPS.spacing / 2] as const;
 export const STUMP_X = [-STUMPS.spacing, 0, STUMPS.spacing] as const;
@@ -47,8 +61,23 @@ export type WicketHit = {
   toward?: Vec3;
   /** hero bail launch speed in m/s along `toward` (default 3.4 * strength). */
   towardSpeed?: number;
-  /** which bail flies along `toward`; default the bail nearest the struck stump. */
+  /** which bail flies along `toward` / to `heroTarget`; default the bail nearest the struck stump. */
   heroBail?: 0 | 1;
+  /**
+   * Exact aim for the hero bail (wicket-local, metres): its barrel centre passes through this point
+   * at action time `heroTime` after the hit (ballistic, solved analytically). Overrides `toward`.
+   * Keep the point above ~0.05 m so the arc does not touch the ground first.
+   */
+  heroTarget?: Vec3;
+  /** seconds (action time) for the hero bail to reach heroTarget. Default 0.45. */
+  heroTime?: number;
+  /** hero bail tumble rate, rad/s (default 16 * strength). */
+  heroSpin?: number;
+  /**
+   * hero bail tumble axis (wicket-local). Default: its flight direction, so the bail cartwheels
+   * face-on to a camera it flies at (the long axis sweeps across the frame).
+   */
+  heroSpinAxis?: Vec3;
   /** variation seed */
   seed?: number;
 };
@@ -237,7 +266,16 @@ export const wicketHitState = (tSinceHit: number, hit: WicketHit): WicketState =
     const adjacent = Math.abs(bx) < STUMPS.spacing * 0.75;
     const energy = adjacent ? 1 : 0.62;
     let v: THREE.Vector3;
-    if (hit.toward && i === hero) {
+    let heroAxis: THREE.Vector3 | null = null;
+    if (hit.heroTarget && i === hero) {
+      const T = Math.max(0.05, hit.heroTime ?? 0.45);
+      v = new THREE.Vector3(...hit.heroTarget).sub(p0).divideScalar(T);
+      v.y += 0.5 * GRAVITY * T;
+      const ax = hit.heroSpinAxis ? new THREE.Vector3(...hit.heroSpinAxis) : v.clone().setY(v.y * 0.2);
+      if (ax.lengthSq() < 1e-8) ax.set(0, 0, 1);
+      // a little precession so it never looks like a perfect propeller
+      heroAxis = ax.normalize().add(new THREE.Vector3(0.12 * (h(seed, 50) - 0.5), 0.1, 0)).normalize();
+    } else if (hit.toward && i === hero) {
       const T = new THREE.Vector3(...hit.toward);
       if (T.lengthSq() < 1e-8) T.set(0, 0.3, 1);
       T.normalize();
@@ -252,10 +290,13 @@ export const wicketHitState = (tSinceHit: number, hit: WicketHit): WicketState =
     }
     // tumble mostly end-over-end: spin axis roughly perpendicular to the bail axis (X)
     const ang = h(seed, 40 + i) * Math.PI * 2;
-    const spinAxis = new THREE.Vector3(0.25 * (h(seed, 42 + i) - 0.5), Math.cos(ang), Math.sin(ang)).normalize();
-    const spin = (16 + 14 * h(seed, 44 + i)) * s * (h(seed, 46 + i) < 0.5 ? -1 : 1);
-    // a short delay for the non-adjacent bail (it is knocked by its neighbour)
-    const delay = adjacent ? 0 : 0.008 + 0.01 * h(seed, 48 + i);
+    const spinAxis = heroAxis ?? new THREE.Vector3(0.25 * (h(seed, 42 + i) - 0.5), Math.cos(ang), Math.sin(ang)).normalize();
+    const spin =
+      heroAxis !== null
+        ? (hit.heroSpin ?? 16 * s)
+        : (16 + 14 * h(seed, 44 + i)) * s * (h(seed, 46 + i) < 0.5 ? -1 : 1);
+    // a short delay for the non-adjacent bail (it is knocked by its neighbour); never for an aimed hero
+    const delay = adjacent || heroAxis !== null ? 0 : 0.008 + 0.01 * h(seed, 48 + i);
     const tb = t - delay;
     if (tb <= 0) return restBail(i);
     const sim = simulateBail(tb, p0, { v, spinAxis, spin });

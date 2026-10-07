@@ -4,7 +4,21 @@
  *
  * Usage in a shot:
  *   const st = stadiumStateAt(F);                       // from ./Stadium
- *   <StadiumLights intensity={floodMaster(st.floods)} rimDir={rimDirFor(camPos, subjectPos)} />
+ *   <StadiumLights intensity={floodMaster(st.floods)} rimDir={rimDirFor(camPos, subjectPos)}
+ *                  shadows shadowCenter={subjectPos} shadowSize={6} />
+ *
+ * Recipe (three.js physical light units, ACES): two keys from opposite banks (1 and 5, 35deg up,
+ * KEY_INTENSITY each, one warmed ~20%, only key A casts shadows), a floodWhite+15% teal directional
+ * rim from behind the subject (RIM_INTENSITY, kept moderate so the grass does not sheen), a dark
+ * hemisphere fill (#1b2a33 / #20381f), a low teal accent from the LED boards, and a procedural
+ * stadium environment map for reflections (flood spots, LED ring, lit field).
+ *
+ * Athletes: wrap kit / helmet / pad / bat / skin materials in withStadiumRim(material, strength) to
+ * get the broadcast fresnel rim on the side facing the shot's rim light (the ground never gets it).
+ *
+ * Shared with Stadium/Atmosphere: FLOOD_BANKS (bank geometry), BEAM_GLSL (beamField, beamFieldSeen,
+ * hazePhase), BEAM_EDGE (normalised radius where beam density reaches zero), getNoise3D() /
+ * getNoise2D() (deterministic tileable noise textures, built once per tab).
  *
  * Everything here is a pure function of props: no per-frame accumulation.
  */
@@ -30,6 +44,12 @@ export const HEAD_HALF_H = 3.0;
 export const HEAD_HALF_W = 3.0 * (BEAM_TAN_X / BEAM_TAN_Y);
 /** Distance from the virtual apex to the lamp panel along the beam axis. */
 export const BEAM_Z_HEAD = HEAD_HALF_H / BEAM_TAN_Y;
+/**
+ * Normalised beam radius beyond which the haze density is exactly zero (the soft edge contributes
+ * < 0.3% past ~0.85). The beam hulls and the ray-marched cone stop here, which saves ~20% of the
+ * beam fragments compared with marching the full r = 1 frustum.
+ */
+export const BEAM_EDGE = 0.93;
 /** Lamp grid per bank. */
 export const LAMP_COLS = 8;
 export const LAMP_ROWS = 5;
@@ -90,19 +110,34 @@ uniform float uFlood[8];
 const float BEAM_TX = ${BEAM_TAN_X.toFixed(6)};
 const float BEAM_TY = ${BEAM_TAN_Y.toFixed(6)};
 const float BEAM_ZH = ${BEAM_Z_HEAD.toFixed(6)};
+const float BEAM_EDGE = ${BEAM_EDGE.toFixed(3)};
 
 // Density of one beam at local frustum coords q (x right, y up, z along the axis from the apex).
-// Bright near the lamp head (inverse-square-ish), soft elliptical edge, a faint floor far away.
+// Bright near the lamp head, soft elliptical edge, a slow (softer than inverse-square) fade with
+// length so the shafts still reach the field.
 float beamLocalDensity(vec3 q) {
   if (q.z < BEAM_ZH) return 0.0;
   vec2 e = q.xy / (vec2(BEAM_TX, BEAM_TY) * q.z);
   float r = length(e);
-  float radial = 1.0 - smoothstep(0.2, 1.0, r);
-  radial *= radial;
-  float core = exp(-r * r * 6.0);
-  float len = pow(BEAM_ZH / q.z, 2.0) + 0.004;
+  if (r >= BEAM_EDGE) return 0.0;
+  float radial = 1.0 - smoothstep(0.15, 1.0, r);
+  radial *= radial * (1.0 - smoothstep(0.85, BEAM_EDGE, r));
+  float core = exp(-r * r * 7.0);
+  float k = BEAM_ZH / q.z;
+  float len = k * k * 0.85 + k * 0.06;
   len *= smoothstep(BEAM_ZH, BEAM_ZH + 2.5, q.z);
-  return (radial * 0.75 + core * 0.4) * len;
+  return (radial * 0.6 + core * 0.55) * len;
+}
+
+// Haze scatters light mostly forward (Henyey-Greenstein, g = 0.3, plus a small isotropic part):
+// a beam glows brighter when you look back toward its lamp and is fainter when you look along it,
+// away from the lamp. cosT = dot(light travel direction, direction to the camera).
+// Normalised to 1.0 at 90 degrees: ~2.9 looking into the lamp, ~0.6 looking away from it.
+float hazePhase(float cosT) {
+  const float g = 0.3;
+  float b = 1.0 + g * g - 2.0 * g * cosT;
+  float hg = (1.0 - g * g) / (b * sqrt(b));
+  return (0.15 + 0.85 * hg) / 0.83;
 }
 
 // Sum of all powered beams at world position p (0 = dark, ~1 = inside a beam near the head).
@@ -113,6 +148,21 @@ float beamField(vec3 p) {
     vec3 d = p - uBeamApex[i];
     vec3 q = vec3(dot(d, uBeamR[i]), dot(d, uBeamU[i]), dot(d, uBeamA[i]));
     sum += uFlood[i] * beamLocalDensity(q);
+  }
+  return sum * smoothstep(0.0, 6.0, p.y);
+}
+
+// Same, as seen from a camera: each beam weighted by the haze phase function.
+// toCam = unit vector from p toward the camera.
+float beamFieldSeen(vec3 p, vec3 toCam) {
+  float sum = 0.0;
+  for (int i = 0; i < 8; i++) {
+    if (uFlood[i] <= 0.001) continue;
+    vec3 d = p - uBeamApex[i];
+    vec3 q = vec3(dot(d, uBeamR[i]), dot(d, uBeamU[i]), dot(d, uBeamA[i]));
+    float dens = beamLocalDensity(q);
+    if (dens <= 0.0) continue;
+    sum += uFlood[i] * dens * hazePhase(dot(d, toCam) / max(length(d), 1e-3));
   }
   return sum * smoothstep(0.0, 6.0, p.y);
 }
@@ -196,6 +246,47 @@ export const getNoise3D = () => {
   t.unpackAlignment = 1;
   t.needsUpdate = true;
   noise3D = t;
+  return t;
+};
+
+let noise2D: THREE.DataTexture | null = null;
+/**
+ * 128^2 tileable smooth value noise (two octaves), R8, bilinear, repeat. A 2D fetch costs about half
+ * a trilinear 3D one in software WebGL: used where the third dimension only drifts slowly.
+ */
+export const getNoise2D = () => {
+  if (noise2D) return noise2D;
+  const N = 128;
+  const r = rng(4417);
+  const lat = (n: number) => Float32Array.from({ length: n * n }, () => r());
+  const g1 = lat(16);
+  const g2 = lat(32);
+  const sample = (g: Float32Array, n: number, x: number, y: number) => {
+    const fx = (x / N) * n;
+    const fy = (y / N) * n;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    const sx = tx * tx * (3 - 2 * tx);
+    const sy = ty * ty * (3 - 2 * ty);
+    const at = (a: number, b: number) => g[(a % n) * n + (b % n)];
+    const l = (a: number, b: number, t: number) => a + (b - a) * t;
+    return l(l(at(x0, y0), at(x0 + 1, y0), sx), l(at(x0, y0 + 1), at(x0 + 1, y0 + 1), sx), sy);
+  };
+  const data = new Uint8Array(N * N);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const v = sample(g1, 16, x, y) * 0.65 + sample(g2, 32, x, y) * 0.35;
+      data[y * N + x] = Math.round(Math.max(0, Math.min(1, v)) * 255);
+    }
+  const t = new THREE.DataTexture(data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
+  t.minFilter = THREE.LinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  noise2D = t;
   return t;
 };
 
@@ -286,13 +377,17 @@ const getStadiumEnv = (gl: THREE.WebGLRenderer) => {
 
 /**
  * Rim direction for a subject seen from a camera: points from the subject toward a light
- * placed behind the subject (opposite the camera), offset sideways and raised.
- * side: -1..1 (which side of the frame the rim edge appears), lift: 0..1 (elevation).
+ * placed behind the subject (opposite the camera), offset sideways and raised, like a far-side
+ * floodlight bank.
+ * side: -1..1, which side of the frame the bright edge appears on (+ = screen right).
+ * lift: 0..1, elevation = lift * 69deg. Default 0.42 = 29deg, the elevation of the banks seen from
+ * mid-field. Lower values carve the body more but put a grazing sheen on the grass toward the light.
  */
-export const rimDirFor = (camera: Vec3, subject: Vec3, side = 0.45, lift = 0.42): Vec3 => {
+export const rimDirFor = (camera: Vec3, subject: Vec3, side = 0.6, lift = 0.42): Vec3 => {
   const back = new THREE.Vector3(subject[0] - camera[0], 0, subject[2] - camera[2]);
   if (back.lengthSq() < 1e-6) back.set(0, 0, 1);
   back.normalize();
+  // screen right of a camera looking along `back` is back x up = (-back.z, 0, back.x)
   const lat = new THREE.Vector3(-back.z, 0, back.x);
   const d = back.clone().addScaledVector(lat, side);
   d.normalize().multiplyScalar(Math.cos(lift * 1.2));
@@ -309,18 +404,78 @@ const bankDir = (i: number, elevDeg: number) => {
 };
 
 /* ------------------------------------------------------------------ */
+/* Fresnel rim for athletes (opt-in material patch)                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Shared uniforms of the art-directed rim. <StadiumLights/> writes them every frame from its
+ * rimDir / rim / intensity props, so every patched material follows the shot's rim light.
+ */
+export const RIM_UNIFORMS = {
+  /** world direction from the subject toward the rim light */
+  uRimDirW: { value: new THREE.Vector3(0, 0.45, 1).normalize() },
+  /** linear rim colour, premultiplied by its strength */
+  uRimColor: { value: new THREE.Color(0, 0, 0) },
+};
+
+/**
+ * Why: dark graphite kit barely shows a physical rim (its albedo is ~2%), and a directional rim
+ * strong enough to carve it would also flood the grass. This patch adds a clean fresnel edge on
+ * the side of the subject that faces the shot's rim light, on the materials that opt in (kit,
+ * helmet, pads, bat, skin), and never on the ground.
+ *
+ *   const shirt = withStadiumRim(new THREE.MeshPhysicalMaterial({...}), 1.0);
+ *
+ * Works with MeshStandardMaterial and MeshPhysicalMaterial (and keeps an existing onBeforeCompile).
+ * strength: ~1 kit, 0.6 skin, 0.4 white pads/shoes, 0.8 helmet. power: edge tightness (4.5 = a crisp
+ * broadcast rim; 3 = softer, wider).
+ */
+export const withStadiumRim = <M extends THREE.MeshStandardMaterial>(material: M, strength = 1, power = 2.5): M => {
+  const prev = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prev.call(material, shader, renderer);
+    shader.uniforms.uRimDirW = RIM_UNIFORMS.uRimDirW;
+    shader.uniforms.uRimColor = RIM_UNIFORMS.uRimColor;
+    shader.uniforms.uRimStrength = { value: strength };
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nuniform vec3 uRimDirW;\nuniform vec3 uRimColor;\nuniform float uRimStrength;",
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        /* glsl */ `{
+          vec3 rimV = normalize((viewMatrix * vec4(uRimDirW, 0.0)).xyz);
+          float rimNdv = clamp(dot(normal, geometryViewDir), 0.0, 1.0);
+          float rimF = pow(1.0 - rimNdv, ${power.toFixed(2)});
+          float rimSide = smoothstep(0.05, 0.55, dot(normal, rimV));
+          outgoingLight += uRimColor * (uRimStrength * rimF * rimSide);
+        }
+        #include <opaque_fragment>`,
+      );
+  };
+  material.customProgramCacheKey = () => `${prevKey.call(material)}|stadiumRim${power}`;
+  material.needsUpdate = true;
+  return material;
+};
+
+/* ------------------------------------------------------------------ */
 /* <StadiumLights/>                                                    */
 /* ------------------------------------------------------------------ */
 
 export type StadiumLightsProps = {
   /** 0..1 overall flood power (keys, rim and environment scale with it). Default 1. */
   intensity?: number;
-  /** Unit-ish world direction from the subject TOWARD the rim light. Default: from +Z, raised. */
+  /**
+   * World direction from the subject TOWARD the rim light (behind the subject relative to the
+   * camera). Use rimDirFor(cameraPos, subjectPos). Default: from +Z, raised.
+   */
   rimDir?: Vec3;
-  /** Rim strength multiplier (default 1). */
+  /** Rim strength multiplier (directional rim and the fresnel rim, default 1). */
   rim?: number;
-  /** Key strength multiplier (default 1). */
-  key?: number;
+  /** Key strength multiplier (default 1). (Not `key`: React reserves that prop name.) */
+  keyGain?: number;
   /** Which two opposite flood banks act as keys (default [1, 5] = 45deg and 225deg). */
   keyBanks?: [number, number];
   /** Key elevation in degrees (default 35). */
@@ -343,8 +498,12 @@ export type StadiumLightsProps = {
   env?: number;
 };
 
-const KEY_INTENSITY = 2.3;
-const RIM_INTENSITY = 9.0;
+/** Directional key from each of the two key banks (lux-like units, three.js physical lights). */
+export const KEY_INTENSITY = 2.3;
+/** Directional rim. Kept moderate: it also lights the grass, and grazing sheen there blooms. */
+export const RIM_INTENSITY = 4.5;
+/** Fresnel rim on opted-in materials (withStadiumRim), linear radiance at strength 1. */
+export const RIM_FRESNEL = 2.8;
 const FILL_INTENSITY = 7.0;
 const ACCENT_INTENSITY = 1.1;
 const ENV_INTENSITY = 0.55;
@@ -353,7 +512,7 @@ export const StadiumLights: React.FC<StadiumLightsProps> = ({
   intensity = 1,
   rimDir = [0, 0.45, 1],
   rim = 1,
-  key = 1,
+  keyGain = 1,
   keyBanks = [1, 5],
   keyElevation = 35,
   fill = 1,
@@ -392,6 +551,10 @@ export const StadiumLights: React.FC<StadiumLightsProps> = ({
     t.updateMatrixWorld();
   });
 
+  // Fresnel rim uniforms (shared by every withStadiumRim material). Set during render.
+  RIM_UNIFORMS.uRimDirW.value.copy(dR);
+  RIM_UNIFORMS.uRimColor.value.copy(objs.rimCol).multiplyScalar(RIM_FRESNEL * rim * k);
+
   // Shadow map: enabled synchronously during render so the first draw already has it.
   if (shadows && !gl.shadowMap.enabled) {
     gl.shadowMap.enabled = true;
@@ -413,7 +576,7 @@ export const StadiumLights: React.FC<StadiumLightsProps> = ({
         position={pA.toArray()}
         target={objs.targets[0]}
         color={objs.keyCol}
-        intensity={KEY_INTENSITY * key * k}
+        intensity={KEY_INTENSITY * keyGain * k}
         castShadow={shadows}
         shadow-mapSize-width={msz}
         shadow-mapSize-height={msz}
@@ -431,7 +594,7 @@ export const StadiumLights: React.FC<StadiumLightsProps> = ({
         position={pB.toArray()}
         target={objs.targets[1]}
         color={objs.keyColWarm}
-        intensity={KEY_INTENSITY * 0.85 * key * k}
+        intensity={KEY_INTENSITY * 0.85 * keyGain * k}
       />
       <directionalLight
         position={pR.toArray()}
